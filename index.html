@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Cricket Championship — Full Crease & Angle Control</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <div class="stadium-bg"></div>
+    <div class="container">
+        <!-- START SCREEN -->
+        <div id="startScreen" class="screen active">
+            <div class="start-card">
+                <div class="badge">PRO EDITION • FULL CREASE CONTROL</div>
+                <h1>🏏 CRICKET CHAMPIONSHIP</h1>
+                <p class="subtitle">Move Across the Crease • Angle Your Deliveries • Solo AI or 2P Online</p>
+
+                <div class="setup-grid">
+                    <div class="setup-box">
+                        <h3>1. Match Overs</h3>
+                        <div class="pill-group" id="oversSelect">
+                            <button type="button" class="pill active" data-overs="5">5 Overs</button>
+                            <button type="button" class="pill" data-overs="10">10 Overs</button>
+                            <button type="button" class="pill" data-overs="20">20 Overs</button>
+                        </div>
+                    </div>
+
+                    <div class="setup-box">
+                        <h3>2. Game Mode</h3>
+                        <div class="pill-group" id="modeSelect">
+                            <button type="button" class="pill active" data-mode="ai">🤖 Vs AI</button>
+                            <button type="button" class="pill" data-mode="online">🌐 2P Online</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Setup -->
+                <div id="aiSetupPanel" class="sub-panel">
+                    <h3>AI Difficulty</h3>
+                    <div class="pill-group" id="difficultySelect">
+                        <button type="button" class="pill" data-diff="easy">Easy</button>
+                        <button type="button" class="pill active" data-diff="normal">Normal</button>
+                        <button type="button" class="pill" data-diff="hard">Hard</button>
+                    </div>
+                    <button id="startSoloBtn" class="start-btn">🎮 Start Match</button>
+                </div>
+
+                <!-- Online Setup -->
+                <div id="onlineSetupPanel" class="sub-panel" style="display:none;">
+                    <h3>2-Player Online Lobby</h3>
+                    <div class="online-actions">
+                        <button id="createRoomBtn" class="secondary-btn">➕ Create Room (Host)</button>
+                        <div class="join-box">
+                            <input type="text" id="joinRoomInput" placeholder="Enter Room Code" maxlength="20">
+                            <button id="joinRoomBtn" class="start-btn small">🔗 Join</button>
+                        </div>
+                    </div>
+                    <div id="lobbyStatus" class="lobby-status">Create a room or paste your friend's Room ID.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GAME SCREEN -->
+        <div id="gameScreen" class="screen">
+            <div class="match-topbar">
+                <span id="formatBadge" class="tag">5 OVERS • VS AI</span>
+                <span id="targetBadge" class="tag highlight" style="display:none;">Target: --</span>
+                <div class="topbar-right">
+                    <span id="connectionBadge" class="tag online" style="display:none;">🟢 Connected</span>
+                    <button type="button" id="soundToggleBtn" class="sound-btn">🔊 SFX: ON</button>
+                </div>
+            </div>
+
+            <!-- SCOREBOARD -->
+            <div class="scoreboard">
+                <div class="team-card" id="p1Card">
+                    <div class="team-label" id="p1Label">YOUR TEAM</div>
+                    <div class="big-score"><span id="p1Score">0</span>/<span id="p1Wickets">0</span></div>
+                    <div class="overs-display" id="p1Overs">0.0 / 5 overs</div>
+                </div>
+                <div class="vs">VS</div>
+                <div class="team-card" id="p2Card">
+                    <div class="team-label" id="p2Label">OPPONENT</div>
+                    <div class="big-score"><span id="p2Score">0</span>/<span id="p2Wickets">0</span></div>
+                    <div class="overs-display" id="p2Overs">0.0 / 5 overs</div>
+                </div>
+            </div>
+
+            <!-- PITCH & LIVE FLIGHT VISUALIZER -->
+            <div class="pitch-area">
+                <div class="telemetry-bar">
+                    <span>Angle: <strong id="telAngle">--</strong></span>
+                    <span>Speed: <strong id="telSpeed">--</strong> km/h</span>
+                    <span>Line: <strong id="telLine">--</strong></span>
+                    <span>Length: <strong id="telLength">--</strong></span>
+                    <span>Move: <strong id="telMove">--</strong></span>
+                </div>
+
+                <div class="pitch">
+                    <div class="crease left"></div>
+                    <div class="crease right"></div>
+                    <!-- Stumps -->
+                    <div class="stumps left">|||</div>
+                    <div class="stumps right">|||</div>
+                    <div class="hitting-zone"></div>
+                    <div class="pitch-marker" id="pitchMarker"></div>
+                    <div class="bowler-end" id="bowlerEnd">🎳</div>
+                    <div class="ball" id="ball"></div>
+                    <div class="batsman-end" id="batsman">🏏</div>
+                </div>
+
+                <div class="ball-result" id="ballResult">Match ready!</div>
+            </div>
+
+            <div class="status-bar" id="statusMsg">Get ready...</div>
+
+            <!-- REACTIVE BATTING CONTROLS -->
+            <div class="controls-panel" id="battingControls" style="display:none;">
+                <div class="panel-header">
+                    <h3>🏏 Batter Crease Movement & Shot Selection</h3>
+                    <button type="button" id="readyToBatBtn" class="ready-btn">👀 Ready for Next Ball</button>
+                </div>
+
+                <div class="control-row four-col">
+                    <!-- Lateral Crease Position -->
+                    <div class="control-group">
+                        <label>Crease Guard (A / D)</label>
+                        <div class="btn-grid" id="batterGuardGroup">
+                            <button type="button" class="opt-btn" data-val="off">Off Stump (A)</button>
+                            <button type="button" class="opt-btn active" data-val="middle">Middle</button>
+                            <button type="button" class="opt-btn" data-val="leg">Leg / Room (D)</button>
+                        </div>
+                    </div>
+
+                    <!-- Depth / Footwork -->
+                    <div class="control-group">
+                        <label>Crease Depth (W / S)</label>
+                        <div class="btn-grid" id="footworkGroup">
+                            <button type="button" class="opt-btn" data-val="advance">Advance Down (W)</button>
+                            <button type="button" class="opt-btn active" data-val="crease">In Crease</button>
+                            <button type="button" class="opt-btn" data-val="back">Deep Back (S)</button>
+                        </div>
+                    </div>
+
+                    <!-- Shot Type -->
+                    <div class="control-group">
+                        <label>Shot Type (Keys 1–5)</label>
+                        <div class="btn-grid" id="shotTypeGroup">
+                            <button type="button" class="opt-btn" data-val="defend">1: 🛡️ Defend</button>
+                            <button type="button" class="opt-btn active" data-val="ground">2: 🏏 Drive</button>
+                            <button type="button" class="opt-btn" data-val="cutpull">3: ⚡ Cut/Pull</button>
+                            <button type="button" class="opt-btn" data-val="sweep">4: 🧹 Sweep</button>
+                            <button type="button" class="opt-btn" data-val="loft">5: 🚀 Loft</button>
+                        </div>
+                    </div>
+
+                    <!-- Direction -->
+                    <div class="control-group">
+                        <label>Placement (Arrows)</label>
+                        <div class="btn-grid" id="shotDirGroup">
+                            <button type="button" class="opt-btn" data-val="off">← Off</button>
+                            <button type="button" class="opt-btn active" data-val="straight">↑ Straight</button>
+                            <button type="button" class="opt-btn" data-val="leg">→ Leg</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LIVE BALL DISTANCE / TIMING GAUGE -->
+                <div class="timing-wrapper">
+                    <label>Adjust crease position while ball flies, then press <strong>SPACE</strong> in the Green Sweet Spot!</label>
+                    <div class="timing-bar">
+                        <div class="timing-zone early">TOO EARLY</div>
+                        <div class="timing-zone good">GOOD</div>
+                        <div class="timing-zone perfect">SWEET SPOT</div>
+                        <div class="timing-zone late">LATE</div>
+                        <div class="timing-cursor" id="timingCursor"></div>
+                    </div>
+                    <button type="button" id="playShotBtn" class="action-btn bat" disabled>🏏 SWING BAT (SPACE)</button>
+                </div>
+            </div>
+
+            <!-- BOWLING CONTROLS -->
+            <div class="controls-panel" id="bowlingControls" style="display:none;">
+                <h3>🎳 Bowling Controls — Adjust Crease Angle, Length & Pace</h3>
+                <div class="bowling-grid">
+                    <div class="bowl-box">
+                        <label>1. Crease Angle</label>
+                        <div class="btn-grid" id="bowlAngleGroup">
+                            <button type="button" class="opt-btn active" data-val="over">Over Wicket</button>
+                            <button type="button" class="opt-btn" data-val="wide">Wide Crease</button>
+                            <button type="button" class="opt-btn" data-val="round">Round Wicket</button>
+                        </div>
+                    </div>
+                    <div class="bowl-box">
+                        <label>2. Target Line</label>
+                        <div class="btn-grid" id="bowlLineGroup">
+                            <button type="button" class="opt-btn active" data-val="off">Outside Off</button>
+                            <button type="button" class="opt-btn" data-val="middle">At Stumps</button>
+                            <button type="button" class="opt-btn" data-val="leg">Leg Stump</button>
+                        </div>
+                    </div>
+                    <div class="bowl-box">
+                        <label>3. Variation</label>
+                        <div class="btn-grid" id="bowlVarGroup">
+                            <button type="button" class="opt-btn active" data-val="seam">Seam</button>
+                            <button type="button" class="opt-btn" data-val="inswing">In-Swing</button>
+                            <button type="button" class="opt-btn" data-val="outswing">Out-Swing</button>
+                            <button type="button" class="opt-btn" data-val="spin">Spin</button>
+                        </div>
+                    </div>
+                    <div class="bowl-box">
+                        <label>4. Pitch Length: <span id="lengthLabel">Good Length</span></label>
+                        <input type="range" id="bowlLengthSlider" min="15" max="92" value="58">
+                        <div class="slider-hints"><span>Short/Bouncer</span><span>Good</span><span>Yorker</span></div>
+                    </div>
+                    <div class="bowl-box">
+                        <label>5. Delivery Pace: <span id="paceVal">135</span> km/h</label>
+                        <input type="range" id="bowlSpeedSlider" min="85" max="155" value="135">
+                        <div class="slider-hints"><span>85 (Slow)</span><span>125 (Med)</span><span>155 (Express)</span></div>
+                    </div>
+                </div>
+                <button type="button" id="deliverBallBtn" class="action-btn bowl">🎳 BOWL DELIVERY</button>
+            </div>
+
+            <!-- GAME LOG -->
+            <div class="log-panel">
+                <h4>📋 Ball-by-Ball Commentary</h4>
+                <div id="gameLog" class="log-content"></div>
+            </div>
+        </div>
+
+        <!-- RESULT SCREEN -->
+        <div id="resultScreen" class="screen">
+            <div class="result-card">
+                <h2 id="resultTitle">Match Complete</h2>
+                <p id="resultMessage" class="result-highlight"></p>
+                <div class="final-stats" id="finalStats"></div>
+                <button id="restartBtn" class="start-btn">🔄 Back to Lobby</button>
+            </div>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
