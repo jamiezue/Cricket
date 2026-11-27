@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>CRICKET PRO — Full-Screen Broadcast Edition</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
@@ -56,7 +57,7 @@
             <div id="onlineSetupPanel" style="display:none;">
                 <div class="online-row">
                     <button id="createRoomBtn" class="secondary-cta">Create Room</button>
-                    <input type="text" id="joinRoomInput" placeholder="ROOM CODE" maxlength="15">
+                    <input type="text" id="joinRoomInput" placeholder="ROOM CODE" maxlength="15" aria-label="Room code">
                     <button id="joinRoomBtn" class="primary-cta compact">Join</button>
                 </div>
                 <div id="lobbyStatus" class="lobby-msg">Host a room or enter a friend's code.</div>
@@ -301,7 +302,7 @@
 
                 <div class="dock-group">
                     <span class="dock-label">PACE: <b id="paceVal">135</b> KM/H • <b id="lengthLabel">GOOD LENGTH</b></span>
-                    <input type="range" id="bowlSpeedSlider" min="85" max="155" value="135" class="sleek-slider">
+                    <input type="range" id="bowlSpeedSlider" min="85" max="155" value="135" class="sleek-slider" aria-label="Bowling pace in kilometres per hour">
                     <span class="hint-micro">Click/drag pitch spot to aim • Drag fielders to set field</span>
                 </div>
 
@@ -312,7 +313,7 @@
                         <button type="button" class="m-pill active" data-val="balanced">Balanced</button>
                         <button type="button" class="m-pill" data-val="defensive">Defend</button>
                     </div>
-                    <select id="bowlerSelectDropdown" class="sleek-select" title="Change Bowler"></select>
+                    <select id="bowlerSelectDropdown" class="sleek-select" title="Change Bowler" aria-label="Change bowler"></select>
                 </div>
 
                 <button type="button" id="deliverBallBtn" class="trigger-btn bowl">BOWL</button>
