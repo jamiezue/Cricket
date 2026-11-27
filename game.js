@@ -1170,40 +1170,42 @@
 
         // The nearest fielder runs to the ball and arrives with it (chase
         // duration matched to the ball), instead of teleporting there.
+        // ✅ Fielder runs to intercept ball
         const fielderEl = (mode === 'field' || mode === 'catch') && outcome.nearestFielder
-            ? document.querySelector(`.fielder[data-id="${outcome.nearestFielder.id}"]`) : null;
+          ? document.querySelector(`.fielder[data-id="${outcome.nearestFielder.id}"]`) : null;
+        
         if (fielderEl) {
-            const endS = toScreen(endPt.x, endPt.y);
-            fielderEl.classList.add('chasing');
-            fielderEl.style.transitionDuration = `${ballDur}ms`;
-            fielderEl.style.left = `${endS.x}%`;
-            fielderEl.style.top = `${endS.y}%`;
+          const endS = toScreen(landing.x, landing.y);
+          // ✅ Fielder starts moving immediately, not late
+          fielderEl.classList.add('chasing');
+          fielderEl.style.transitionDuration = `${Math.max(400, ballDur - 150)}ms`;
+          fielderEl.style.left = `${endS.x}%`;
+          fielderEl.style.top = `${endS.y}%`;
         }
-
-        animateBallPath(start, endPt, ballDur, { arc: arc + (isBoundary ? 10 : 0), hop, easing: 'out', startScale: 1.15, endScale: mode === 'keeper' ? 0.9 : 0.7 }, () => {
-            // On arrival the ball is HELD: a catch, a keeper take, or a
-            // fielder gathering it -- it does not instantly fly back.
-            if (mode === 'catch' && fielderEl) {
-                fielderEl.classList.remove('chasing');
-                fielderEl.classList.add('catching');
-                showBanner('OUT!', outcome.commentary);
-                SoundFX.crowdRoar(false);
+        
+        animateBallPath(start, endPt, ballDur, { 
+          arc: arc + (isBoundary ? 12 : 0), 
+          hop, 
+          easing: 'out', 
+          startScale: 1.15, 
+          endScale: mode === 'keeper' ? 0.9 : 0.7 
+        }, () => {
+          if (fielderEl) {
+            fielderEl.classList.remove('chasing');
+            if (mode === 'catch') {
+              fielderEl.classList.add('catching');
+              showBanner('CAUGHT!', `${outcome.nearestFielder.short} takes the catch!`);
+              SoundFX.crowdRoar(false);
             }
-            if (mode === 'keeper') {
-                const k = $('keeper');
-                if (k) { k.classList.add('diving'); setTimeout(() => k.classList.remove('diving'), 700); }
-                if (outcome.isOut) showBanner('OUT!', outcome.commentary);
-            }
-            if (mode === 'bowled') showBanner('OUT!', outcome.commentary);
-            const holdMs = mode === 'catch' ? 950 : mode === 'keeper' ? 500 : mode === 'bowled' ? 550 : 350;
+            // ✅ Return fielder smoothly to position
             setTimeout(() => {
-                if (fielderEl) {
-                    fielderEl.classList.remove('catching', 'chasing');
-                    fielderEl.style.transitionDuration = '';
-                    const home = toScreen(outcome.nearestFielder.x, outcome.nearestFielder.y);
-                    fielderEl.style.left = `${home.x}%`;
-                    fielderEl.style.top = `${home.y}%`;
-                }
+              fielderEl.classList.remove('catching');
+              const home = toScreen(outcome.nearestFielder.x, outcome.nearestFielder.y);
+              fielderEl.style.transitionDuration = '400ms';
+              fielderEl.style.left = `${home.x}%`;
+              fielderEl.style.top = `${home.y}%`;
+            }, 600);
+          }
                 if (state.runRequested && state.mode === 'ai' && outcome.runs === 0 && !outcome.isOut && !outcome.extra) {
                     if (onDone) onDone();
                     return;
