@@ -375,8 +375,13 @@ html, body {
 .fielder.near { transform: translate(-50%, -50%) scale(1.12); }
 .fielder.catching { transform: translate(-50%, -50%) translateY(-12px) scale(1.18); z-index: 21; }
 .fielder.catching .fielder-body { background: #f59e0b; }
-.fielder.chasing .fielder-body { animation: sprintPulse 0.25s infinite alternate; }
-@keyframes sprintPulse { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
+.fielder.chasing {
+  transition: left 0.35s ease-out, top 0.35s ease-out !important;
+}
+@keyframes sprintPulse { 
+  0% { transform: translate(-50%, -50%) rotate(-6deg) scale(1.05); } 
+  100% { transform: translate(-50%, -50%) rotate(6deg) scale(1.05); } 
+}
 
 /* Running exchange: batters glide the full pitch (~1.15s per cross) with striding legs */
 .batsman-end.running-exchange, .non-striker.running-exchange { transition: transform 1.12s linear !important; }
