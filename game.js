@@ -132,10 +132,153 @@
         overRuns: [],
         wagonShots: [],
         aiMemory: { shotTypes: {}, dirs: {}, guards: {}, footwork: {}, bowlLines: {}, bowlLengths: {}, bowlVars: {}, boundaries: 0, ballsFaced: 0 },
-        inningsData: null
+        inningsData: null,
+        conditions: null
     };
 
     const $ = (id) => document.getElementById(id);
+
+    // ==========================================
+    // BROADCAST EDITION — RANDOM CLIMATE, STADIUM & TV GRAPHICS
+    // ==========================================
+    const VENUES = [
+        { name: 'R. Premadasa Stadium, Colombo', city: 'Colombo' },
+        { name: "Lord's, London", city: 'London' },
+        { name: 'Melbourne Cricket Ground', city: 'Melbourne' },
+        { name: 'Eden Gardens, Kolkata', city: 'Kolkata' },
+        { name: 'Newlands, Cape Town', city: 'Cape Town' },
+        { name: 'Galle International Stadium', city: 'Galle' }
+    ];
+    const CROWD_COLOURS = ['#e53935','#1976d2','#fdd835','#43a047','#ff7043','#ab47bc','#00acc1','#f5f5f5','#ffca28','#8d6e63'];
+    function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+    function generateConditions() {
+        const venue = pick(VENUES);
+        const weather = pick(['Sunny','Sunny','Partly Cloudy','Overcast','Overcast','Humid','Humid','Light Drizzle']);
+        const tempC = weather==='Sunny' ? 28+Math.floor(Math.random()*7) : weather==='Overcast' ? 19+Math.floor(Math.random()*6) : 22+Math.floor(Math.random()*8);
+        const humidity = weather==='Humid' ? 78+Math.floor(Math.random()*17) : weather==='Overcast' ? 65+Math.floor(Math.random()*20) : weather==='Light Drizzle' ? 88+Math.floor(Math.random()*10) : 42+Math.floor(Math.random()*28);
+        const windKmh = 3+Math.floor(Math.random()*29);
+        const windDirs = [
+            { label:'Off → Leg', arrow:'→', lateral: 1, along: 0 },
+            { label:'Leg → Off', arrow:'←', lateral:-1, along: 0 },
+            { label:'Headwind', arrow:'↓', lateral: 0, along:-1 },
+            { label:'Tailwind', arrow:'↑', lateral: 0, along: 1 },
+            { label:'Off → Leg ↘', arrow:'↘', lateral: 1, along:-1 },
+            { label:'Leg → Off ↗', arrow:'↗', lateral:-1, along: 1 }
+        ];
+        const wind = pick(windDirs);
+        // Dew: high humidity + evening + humid/drizzle weather. It gets worse in the 2nd innings.
+        let dew = Math.round(Math.min(95, Math.max(5, (humidity-55)*1.4 + (weather==='Humid'?18:0) + (weather==='Light Drizzle'?22:0) + Math.random()*18)));
+        const pitch = pick(['Flat — batter friendly','Green — seam movement','Dry — turns late','Slow — low bounce']);
+        const c = { venue: venue.name, weather, tempC, humidity, windKmh, windDir: wind.label, windArrow: wind.arrow, windLateral: wind.lateral, windAlong: wind.along, dew, pitch,
+            swingBoost: weather==='Overcast' ? 0.09 : weather==='Humid' ? 0.06 : weather==='Light Drizzle' ? 0.05 : 0.01,
+            spinBoost: pitch.includes('Dry') ? 0.07 : pitch.includes('Green') ? -0.03 : 0 };
+        state.conditions = c;
+        return c;
+    }
+    function dewLabel(d){ return d>=70?'Heavy 💧💧':d>=40?'Moderate 💧':d>=20?'Light 💧':'Dry'; }
+    function windDesc(c){ return `${c.windKmh} km/h ${c.windDir} ${c.windArrow}`; }
+    function conditionsSummary(c){
+        const parts = [];
+        if (c.swingBoost>=0.06) parts.push('Swing is on — overcast/humid air will move the ball late.');
+        if (c.windKmh>=20) parts.push(`Strong ${c.windDir.toLowerCase()} wind (${c.windKmh} km/h) will push the ball${c.windLateral!==0?' sideways':''}${c.windAlong===1?' and carry sixes further':c.windAlong===-1?' and hold sixes up':''}.`);
+        else if (c.windKmh>=10) parts.push(`A ${c.windKmh} km/h ${c.windDir.toLowerCase()} breeze will drift the ball a little.`);
+        if (c.dew>=60) parts.push('Heavy dew expected later — the ball will get wet, spinners will struggle for grip and fielders may fumble.');
+        else if (c.dew>=35) parts.push('Some dew later — watch the ball get slippery in the 2nd innings.');
+        if (c.pitch.includes('Green')) parts.push('Green pitch: seamers get extra movement early.');
+        if (c.pitch.includes('Dry')) parts.push('Dry pitch: spin will bite as the game goes on.');
+        if (c.pitch.includes('Flat')) parts.push('Flat pitch: runs are on offer, bowlers must be clever.');
+        return parts.join(' ') || 'Perfect batting weather — no excuses.';
+    }
+    function buildCrowd(){
+        ['crowdTop','crowdBottom'].forEach(id=>{
+            const el = $(id); if(!el) return;
+            el.innerHTML='';
+            const n = id==='crowdTop'?170:130;
+            for(let i=0;i<n;i++){ const d=document.createElement('i'); d.style.background=CROWD_COLOURS[Math.floor(Math.random()*CROWD_COLOURS.length)]; el.appendChild(d); }
+        });
+    }
+    function applyStadiumLook(){
+        const c = state.conditions; if(!c) return;
+        const shell = $('stadiumShell'); if(!shell) return;
+        shell.classList.toggle('overcast', c.weather==='Overcast');
+        shell.classList.toggle('night', c.weather==='Overcast' && c.tempC<22);
+        shell.classList.toggle('drizzle', c.weather==='Light Drizzle');
+        shell.classList.toggle('windy', c.windKmh>=14);
+        shell.style.setProperty('--wind-dur', Math.max(0.35, 1.6 - c.windKmh*0.04)+'s');
+        const pitch = $('pitch'); if(pitch) pitch.classList.toggle('dewy', c.dew>=45);
+        const wa = $('tvWindArrow'); if(wa) wa.textContent = `💨 ${c.windArrow} ${c.windKmh} km/h ${c.windDir}`;
+    }
+    function renderConditions(){
+        const c = state.conditions; if(!c) return;
+        const grid = $('condGrid');
+        if(grid) grid.innerHTML = `
+            <div class="cond-cell"><b>Weather</b><span>${c.weather==='Sunny'?'☀️':c.weather==='Overcast'?'☁️':c.weather==='Light Drizzle'?'🌧️':'🌤️'} ${c.weather} • ${c.tempC}°C</span></div>
+            <div class="cond-cell"><b>Wind</b><span>💨 ${windDesc(c)}</span></div>
+            <div class="cond-cell"><b>Dew</b><span>${dewLabel(c.dew)} — ${c.dew}%</span></div>
+            <div class="cond-cell"><b>Humidity</b><span>💦 ${c.humidity}%</span></div>
+            <div class="cond-cell"><b>Pitch</b><span>${c.pitch}</span></div>
+            <div class="cond-cell"><b>Swing</b><span>${c.swingBoost>=0.06?'High ↗':'Low →'}</span></div>`;
+        const venueEl = $('condVenue'); if(venueEl) venueEl.textContent = `🏟️ ${c.venue}`;
+        const note = $('condNote'); if(note) note.textContent = '📋 ' + conditionsSummary(c);
+        const bar = $('tvConditionsBar');
+        if(bar) bar.innerHTML = `🏟️ <b>${c.venue}</b> &nbsp;•&nbsp; ${c.weather} ${c.tempC}°C &nbsp;•&nbsp; 💨 Wind ${windDesc(c)} &nbsp;•&nbsp; 💧 Dew ${dewLabel(c.dew)} (${c.dew}%) &nbsp;•&nbsp; 🌱 ${c.pitch}`;
+        const wb = $('tvWeatherBug');
+        if(wb) wb.textContent = `💨 ${c.windKmh} km/h ${c.windDir} ${c.windArrow} • 💧 Dew ${c.dew}% • 🌡️ ${c.tempC}°C • 💦 ${c.humidity}%`;
+        const th = $('tossConditionsHint');
+        if(th) th.textContent = `Conditions: ${c.weather}, ${c.tempC}°C, wind ${windDesc(c)}, dew ${dewLabel(c.dew)}. ${conditionsSummary(c)}`;
+        applyStadiumLook();
+    }
+    function updateTVScorebug(){
+        const c = state.conditions;
+        const team = state[state.battingSide];
+        const name = state.battingSide==='p1' ? ($('p1Label')?$('p1Label').textContent:'YOU') : ($('p2Label')?$('p2Label').textContent:'AI');
+        const tn = $('tvTeamName'); if(tn) tn.textContent = name;
+        const ts = $('tvScore'); if(ts) ts.textContent = `${team.score}/${team.wickets}`;
+        const to = $('tvOvers'); if(to) to.textContent = `(${Math.floor(team.balls/6)}.${team.balls%6} ov)`;
+        const crr = team.balls? (team.score/(team.balls/6)).toFixed(1):'—';
+        let rrrTxt = 'RRR —';
+        if(state.target!==null){ const need=Math.max(0,state.target-team.score); const left=Math.max(0,state.maxOvers*6-team.balls); rrrTxt = left? `Need ${need} off ${left} • RRR ${(need/(left/6)).toFixed(1)}` : `Need ${need}`; }
+        const cr = $('tvCrr'); if(cr) cr.textContent = `CRR ${crr} • ${rrrTxt}`;
+        const st=currentStriker(), ns=currentNonStriker(), bw=currentBowler();
+        const tb=$('tvBatters');
+        if(tb) tb.innerHTML = `${st?`<b>${st.name}</b> ${st.batRuns}(${st.batBalls})`:''} ${ns?`• ${ns.name} ${ns.batRuns}(${ns.batBalls})`:''} ${bw?`• 🎳 ${bw.name} ${bw.bowlWkts}/${bw.bowlRuns}`:''}`;
+        const bs=$('bigScreenText');
+        if(bs) bs.innerHTML = `${name}<br>${team.score}/${team.wickets} (${Math.floor(team.balls/6)}.${team.balls%6})`;
+        const bss=$('bigScreenSub');
+        if(bss) bss.textContent = state.target? `TARGET ${state.target}` : (c? `${c.weather.toUpperCase()} • ${c.tempC}°C` : 'LIVE');
+    }
+    function showLowerThird(name, detail){
+        const lt=$('tvLowerThird'); if(!lt) return;
+        $('ltName').textContent=name; $('ltDetail').textContent=detail;
+        lt.classList.add('show');
+        clearTimeout(showLowerThird._t);
+        showLowerThird._t=setTimeout(()=>lt.classList.remove('show'), 4200);
+    }
+    function showBroadcastEvent(kind, text, sub){
+        const ov=$('tvEventOverlay'); if(!ov) return;
+        ov.classList.remove('show','wicket','six');
+        if(kind==='wicket') ov.classList.add('wicket'); if(kind==='six') ov.classList.add('six');
+        $('tvEventText').textContent=text; $('tvEventSub').textContent=sub||'';
+        void ov.offsetWidth; ov.classList.add('show');
+        const bs=$('bigScreenText'); if(bs) bs.innerHTML=text;
+    }
+    function crowdCheer(big){
+        const shell=$('stadiumShell'), bot=$('standsBottom');
+        [shell,bot].forEach(el=>{ if(!el) return; el.classList.add('cheering'); setTimeout(()=>el.classList.remove('cheering'), big?2600:1400); });
+        const mood=$('crowdMood');
+        if(mood) mood.textContent = big?'Crowd on its feet! 🔊':'Crowd roaring!';
+        setTimeout(()=>{ if(mood) mood.textContent='Crowd is buzzing'; }, big?2600:1400);
+    }
+    function umpireSignal(kind){
+        const u=$('umpire'); if(!u) return;
+        u.classList.remove('signal-four','signal-six','signal-out','signal-wide');
+        if(!kind) return;
+        u.classList.add('signal-'+kind);
+        setTimeout(()=>u.classList.remove('signal-'+kind), 1900);
+    }
+    function setTicker(text){ const t=$('tickerText'); if(t) t.textContent=text; }
+    function shakeCamera(){ const p=$('pitch'); if(!p) return; p.classList.remove('shake'); void p.offsetWidth; p.classList.add('shake'); }
+
 
     // ==========================================
     // 3. VISUAL CREASE POSITIONING (Batter & Bowler)
@@ -539,6 +682,10 @@
         $('paceVal').textContent = e.target.value;
     });
 
+    const _reroll = $('rerollConditionsBtn');
+    if (_reroll) _reroll.addEventListener('click', () => { SoundFX.click(); generateConditions(); renderConditions(); setTicker(`Conditions re-rolled — now ${state.conditions.weather}, ${state.conditions.tempC}°C, wind ${windDesc(state.conditions)}, dew ${dewLabel(state.conditions.dew)} at ${state.conditions.venue}.`); });
+    // Conditions for the very first visit, before Start is pressed
+    if (!state.conditions) { generateConditions(); renderConditions(); buildCrowd(); }
     $('soundToggleBtn').addEventListener('click', () => {
         const isMuted = SoundFX.toggleMute();
         $('soundToggleBtn').textContent = isMuted ? '🔇 SFX: OFF' : '🔊 SFX: ON';
@@ -638,6 +785,7 @@
     }
 
     function updateScoreboard() {
+        updateTVScorebug();
         $('p1Score').textContent = state.p1.score;
         $('p1Wickets').textContent = state.p1.wickets;
         $('p1Overs').textContent = formatOvers(state.p1.balls);
@@ -685,7 +833,8 @@
 
         // --- Extras decision (host decides, guest reuses delivery.extra) ---
         if (delivery.extra === undefined) {
-            const wideChance = (delivery.line === 'off' && delivery.angle === 'wide') ? 0.30 : (delivery.line === 'leg' && delivery.angle === 'round') ? 0.20 : 0.04;
+            const _dewWide = state.conditions ? state.conditions.dew/100*0.07 : 0;
+            const wideChance = ((delivery.line === 'off' && delivery.angle === 'wide') ? 0.30 : (delivery.line === 'leg' && delivery.angle === 'round') ? 0.20 : 0.04) + _dewWide + (state.conditions && state.conditions.windKmh>=22 ? 0.03 : 0);
             const r = Math.random();
             if (r < wideChance) delivery.extra = 'wide';
             else if (r < wideChance + (delivery.speed >= 150 ? 0.12 : 0.05)) delivery.extra = 'noball';
@@ -737,7 +886,9 @@
             $('statusMsg').textContent = '\uD83C\uDFB3 Bowler running in...';
         }
 
-        const flightDurationMs = Math.max(1500, 2950 - (delivery.speed * 9.5));
+        const _cond = state.conditions;
+        const _windAlong = _cond ? _cond.windAlong : 0;
+        const flightDurationMs = Math.max(1500, 2950 - (delivery.speed * 9.5) + (_windAlong===-1?180:_windAlong===1?-140:0));
 
         // Start the actual flight only after the run-up + delivery stride.
         // That is what makes the camera move read as one smooth shot, not a cut.
@@ -768,6 +919,9 @@
                 ball.style.top = `${yTop}%`;
 
                 let xPos = startX;
+                // 🌬️ WIND: crosswind drifts the ball sideways as it travels; stronger wind = more drift.
+                const _windDrift = _cond ? _cond.windLateral * (_cond.windKmh/20) * 5.5 * (pct/100) : 0;
+                const _swingDrift = _cond ? _cond.swingBoost * 28 * (pct/100) * ((delivery.variation==='outswing')?-1:(delivery.variation==='inswing'||delivery.variation==='spin')?1:0) : 0;
                 if (pct < bouncePct) {
                     const preRatio = pct / bouncePct;
                     xPos = startX + (targetX - startX) * preRatio;
@@ -783,6 +937,7 @@
                     if (delivery.variation === 'outswing') deviation -= 4;
                     xPos = targetX + (deviation * postRatio);
                 }
+                xPos += _windDrift + _swingDrift;
                 ball.style.left = `${xPos}%`;
 
                 // Small hop just after the bounce, then it settles back onto the pitch line
@@ -933,6 +1088,28 @@
     }
 
     function applyOutcomeNow(delivery, shot, outcome, runOut = false) {
+        // 📺 TV: big event graphic, umpire signal, crowd, camera shake, keeper dive, stumps
+        const _st = currentStriker();
+        if (outcome.isOut || runOut) {
+            showBroadcastEvent('wicket','WICKET', (outcome.commentary || 'Batter departs').slice(0,60));
+            umpireSignal('out'); crowdCheer(true); shakeCamera();
+            const _stumps = document.querySelector('.stumps-bottom');
+            if (_stumps && outcome.commentary.includes('BOWLED')) { _stumps.classList.add('shattered'); setTimeout(()=>_stumps.classList.remove('shattered'), 700); }
+            showLowerThird(_st? _st.name : 'Batter', `OUT — ${outcome.commentary}`);
+            setTicker(`WICKET! ${outcome.commentary} — ${state[state.battingSide].score}/${state[state.battingSide].wickets}`);
+        } else if (outcome.runs>=6) {
+            showBroadcastEvent('six','SIX','🚀 Cleared the ropes!');
+            umpireSignal('six'); crowdCheer(true); shakeCamera();
+            if(_st) showLowerThird(_st.name, `${_st.batRuns} off ${_st.batBalls} — ${_st.fours}×4 ${_st.sixes}×6`);
+            setTicker(`SIX! ${outcome.commentary}`);
+        } else if (outcome.runs===4) {
+            showBroadcastEvent('four','FOUR','🔥 Into the gap — to the boundary!');
+            umpireSignal('four'); crowdCheer(true);
+            setTicker(`FOUR! ${outcome.commentary}`);
+        } else if (outcome.extra==='wide') { umpireSignal('wide'); setTicker('Wide ball — +1 run.'); }
+        else if (outcome.extra==='noball') { umpireSignal('wide'); setTicker('No-ball! Free hit coming up.'); }
+        else if (outcome.runs===0 && (shot.timing==='early'||shot.timing==='late')) { const _k=document.querySelector('.keeper'); if(_k){ _k.classList.add('diving'); setTimeout(()=>_k.classList.remove('diving'),600); } }
+        updateTVScorebug();
         if (outcome.isOut || runOut) {
             if (outcome.commentary.includes('BOWLED')) {
                 SoundFX.stumpsShatter();
@@ -1036,6 +1213,7 @@
         const wc = $('wagonWheel');
         if (wc && wc.getContext) {
             const ctx = wc.getContext('2d');
+            if (!ctx) return;
             ctx.clearRect(0, 0, wc.width, wc.height);
             ctx.fillStyle = '#0e2a12'; ctx.fillRect(0, 0, wc.width, wc.height);
             // pitch
@@ -1057,6 +1235,7 @@
         const mc = $('manhattanChart');
         if (mc && mc.getContext) {
             const ctx = mc.getContext('2d');
+            if (!ctx) return;
             ctx.clearRect(0, 0, mc.width, mc.height);
             ctx.fillStyle = '#0e2a12'; ctx.fillRect(0, 0, mc.width, mc.height);
             const overs = [...state.overRuns];
@@ -1110,6 +1289,8 @@
         body.innerHTML = html;
     }
     function replayLastBall() {
+        const _rbadge = $('tvReplayBadge'); if (_rbadge) _rbadge.style.display='block';
+        setTimeout(()=>{ if(_rbadge) _rbadge.style.display='none'; }, 3200);
         if (state.replaying || !state.replayFrames.length) return;
         if (state.ballInFlight) return;
         state.replaying = true;
@@ -1361,6 +1542,16 @@
         if (state.freeHit && !shot.type.includes('run')) outChance = Math.min(outChance, 0.03);
         outChance = Math.max(0.02, Math.min(0.72, outChance));
 
+        // 🌦️ CLIMATE: overcast/humidity = more swing (harder to hit swing balls), green pitch = seam, dry = spin.
+        // Dew = wet ball: spin grips less, catches are dropped more, lofted shots carry less risk of being held.
+        const _c = state.conditions;
+        if (_c) {
+            if ((delivery.variation==='inswing'||delivery.variation==='outswing')) outChance += _c.swingBoost;
+            if (delivery.variation==='spin') outChance += _c.spinBoost - (_c.dew/100)*0.08;
+            if (delivery.variation==='seam' && _c.pitch.includes('Green')) outChance += 0.05;
+            if (_c.dew>=60 && (shot.type==='loft'||shot.type==='cutpull')) outChance -= 0.05; // wet ball slips through hands
+            if (_c.windAlong===-1 && shot.type==='loft') outChance += 0.02;
+        }
         if (Math.random() < outChance) {
             isOut = true;
             if (exposedStumpsRisk && (shot.timing === 'early' || shot.timing === 'late')) {
@@ -1427,6 +1618,12 @@
             if (finalRuns === 6 && _st.power < 60) { finalRuns = 4; finalCommentary = finalCommentary.replace('SIX', 'FOUR'); }
             else if (finalRuns === 4 && _st.power >= 88 && Math.random() < 0.25) { finalRuns = 6; finalCommentary = '🚀 MASSIVE SIX! Cleared the ropes with power to spare!'; }
         }
+        // 🌬️ WIND on big hits: tailwind carries a 4 over the rope, headwind holds a 6 back to 4.
+        if (!isOut && _c) {
+            if (finalRuns===4 && _c.windAlong===1 && shot.timing==='perfect' && Math.random()<0.3) { finalRuns=6; finalCommentary='🚀 SIX! Tailwind carried it clean over the ropes!'; }
+            else if (finalRuns===6 && _c.windAlong===-1 && Math.random()<0.35) { finalRuns=4; finalCommentary='🔥 FOUR! Headwind held that one up — just short of the rope.'; }
+            if (_c.dew>=70 && finalRuns===0 && (shot.timing==='early'||shot.timing==='late') && Math.random()<0.1) { /* wet-ball fumble handled by bye logic below */ }
+        }
         // Bye / leg-bye: beaten, keeper fumbles — 1 run, counts as a legal ball, no bat runs
         if (!isOut && finalRuns === 0 && (shot.timing === 'early' || shot.timing === 'late') && Math.random() < 0.16 && delivery.extra !== 'noball') {
             const isLeg = delivery.line === 'leg';
@@ -1490,6 +1687,9 @@
         }
         updatePlayersStrip();
         drawCharts();
+        const _s2=currentStriker(), _b2=currentBowler();
+        if(_s2 && _b2) showLowerThird(`${_s2.name}  •  ${_s2.batRuns} (${_s2.batBalls})`, `Bowler: ${_b2.name} — ${_b2.bowlType} • ${state.conditions? state.conditions.weather+', wind '+windDesc(state.conditions):''}`);
+        updateTVScorebug();
     }
 
     $('readyToBatBtn').addEventListener('click', () => {
@@ -1664,6 +1864,7 @@
                     total: current.score, wickets: current.wickets, balls: current.balls, extras: { ...state.extras }
                 });
                 state.innings = 2;
+                if (state.conditions) { state.conditions.dew = Math.min(95, state.conditions.dew + 18 + Math.floor(Math.random()*12)); renderConditions(); setTicker(`2nd innings — dew is now ${dewLabel(state.conditions.dew)} (${state.conditions.dew}%). Bowlers will find the wet ball hard to grip, spinners especially.`); }
                 state.target = current.score + 1;
                 state.battingSide = state.battingSide === 'p1' ? 'p2' : 'p1';
                 SoundFX.crowdRoar(false);
@@ -1727,6 +1928,10 @@
         state.aiMemory = { shotTypes: {}, dirs: {}, guards: {}, footwork: {}, bowlLines: {}, bowlLengths: {}, bowlVars: {}, boundaries: 0, ballsFaced: 0 };
         clearAllTimers();
 
+        if (!state.conditions) generateConditions();
+        renderConditions();
+        buildCrowd();
+        setTicker(`Welcome to ${state.conditions.venue} — ${state.conditions.weather}, ${state.conditions.tempC}°C, wind ${windDesc(state.conditions)}, dew ${dewLabel(state.conditions.dew)}. ${conditionsSummary(state.conditions)}`);
         $('gameLog').innerHTML = '';
         if (!state.field.length) state.field = cloneField(state.fieldPreset || 'balanced');
         renderFielders();
