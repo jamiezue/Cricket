@@ -904,27 +904,35 @@
     }
 
     function triggerBatterSwing() {
-        if (!state.ballInFlight || state.shotTaken || !isLocalBatting()) return;
-        state.shotTaken = true;
-        // The ball is struck from exactly where it is NOW (not from a fixed
-        // spot in front of the stumps) -- that is the contact point the
-        // post-hit ball travels from.
-        state.contactPoint = state.lastBallGround ? { ...state.lastBallGround } : null;
-        const halo = $('timingHalo');
-        if (halo) { halo.classList.remove('impact'); void halo.offsetWidth; halo.classList.add('impact'); }
-        $('playShotBtn').disabled = true;
-        $('runNowBtn').style.display = 'inline-block';
-        $('runNowBtn').disabled = false;
-
-        const depth = getActiveVal('footworkGroup');
-        const shot = {
-            guard: getActiveVal('batterGuardGroup'),
-            footwork: depth,
-            type: getActiveVal('shotTypeGroup'),
-            angle: state.shotAngle,
-            timing: getTimingFromProgress(state.flightProgress, depth)
-        };
-        submitBatterShot(shot);
+      if (!state.ballInFlight || state.shotTaken || !isLocalBatting()) return;
+      state.shotTaken = true;
+      state.contactPoint = state.lastBallGround ? { ...state.lastBallGround } : null;
+      
+      // ✅ Halo impact
+      const halo = $('timingHalo');
+      if (halo) { halo.classList.remove('impact'); void halo.offsetWidth; halo.classList.add('impact'); }
+      
+      // ✅ Bat swing + impact animation
+      const swing = $('swingGroup');
+      if (swing) {
+        swing.classList.remove('impact-hit'); void swing.offsetWidth;
+        swing.classList.add('impact-hit');
+        setTimeout(() => swing.classList.remove('impact-hit'), 150);
+      }
+      
+      $('playShotBtn').disabled = true;
+      $('runNowBtn').style.display = 'inline-block';
+      $('runNowBtn').disabled = false;
+    
+      const depth = getActiveVal('footworkGroup');
+      const shot = {
+        guard: getActiveVal('batterGuardGroup'),
+        footwork: depth,
+        type: getActiveVal('shotTypeGroup'),
+        angle: state.shotAngle,
+        timing: getTimingFromProgress(state.flightProgress, depth)
+      };
+      submitBatterShot(shot);
     }
 
     function submitBatterShot(shot) {
