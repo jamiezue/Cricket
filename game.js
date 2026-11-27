@@ -595,10 +595,18 @@
     // The camera follows the role: behind the batter when batting, behind
     // the bowler when bowling. Called at the start of every ball.
     function updateCameraForRole() {
-        if (isLocalBatting()) { setPOV(false); setCamera('batter'); }
-        else { setPOV(true); setCamera('bowler'); }
-    }
-
+        if (isLocalBatting()) {
+            // 🎯 When BATTING — camera behind batter, looking toward bowler
+            setPOV(false);
+            setCamera('batter');
+            setStatus('Batting — ready to face the ball');
+        } else {
+            // 🎯 When BOWLING — camera behind bowler, looking toward batter
+            setPOV(true);
+            setCamera('bowler');
+            setStatus('Bowling — aim and deliver!');
+        }
+    }          
     function showBanner(bigText, subText, duration = 2200) {
         const big = $('bannerBig');
         const sub = $('ballResult');
