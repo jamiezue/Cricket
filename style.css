@@ -238,10 +238,16 @@ html, body {
 
 /* Bowler */
 .bowler-end {
-    position: absolute; top: 20vh; left: 50%; z-index: 7;
-    transform: translate(-50%, 0) translateX(var(--bowler-x, 0px));
-    transition: transform 0.3s ease, top 1.1s linear, bottom 1.1s linear;
+  position: absolute; 
+  top: 20vh; 
+  left: 50%; 
+  z-index: 7;
+  transform: translate(-50%, 0) translateX(var(--bowler-x, 0px));
+  transition: transform 0.3s ease;
+  /* ✅ Bowler ON the crease, not above it */
+  transform-origin: center bottom;
 }
+
 .bowler-figure { width: 44px; height: 76px; }
 .bowler-figure .p-head { width: 18px; height: 18px; }
 .bowler-figure .p-torso { top: 17px; width: 28px; height: 32px; background: #1d4ed8; }
