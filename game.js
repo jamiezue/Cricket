@@ -139,6 +139,22 @@
     };
 
     const $ = (id) => document.getElementById(id);
+    // --- Safe DOM helpers (the GitHub fix) ---------------------------------
+    // The crash was: one unguarded $('...').addEventListener(...) at load time
+    // threw because that id did not exist in the HTML actually served, and the
+    // throw aborted the whole script -- so ENTER STADIUM (bound later) never
+    // got its listener. `on()` skips a missing element with a warning instead
+    // of throwing, so one stale id can never lock the player out again.
+    const on = (id, ev, fn) => {
+        const el = $(id);
+        if (!el) { console.warn('[cricket] #' + id + ' not found - skipping ' + ev + ' binding'); return null; }
+        el.addEventListener(ev, fn);
+        return el;
+    };
+    const setText = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
+    const setStatus = (msg) => setText('statusMsg', msg);
+    const showEl = (id, display) => { const el = $(id); if (el) el.style.display = display; };
+    const setDisabled = (id, v) => { const el = $(id); if (el) el.disabled = v; };
 
     const VENUES = [
         { name: 'R. Premadasa Stadium, Colombo' },
@@ -243,28 +259,29 @@
 
     function updateHud() {
         const team = state[state.battingSide];
+        if (!team) return;
         const tag = state.battingSide === 'p1' ? 'YOU' : (state.mode === 'ai' ? 'AI' : 'P2');
-        $('battingTeamTag').textContent = tag;
-        $('liveScore').textContent = team.score;
-        $('liveWickets').textContent = team.wickets;
-        $('liveOvers').textContent = `(${Math.floor(team.balls / 6)}.${team.balls % 6}/${state.maxOvers})`;
+        setText('battingTeamTag', tag);
+        setText('liveScore', team.score);
+        setText('liveWickets', team.wickets);
+        setText('liveOvers', `(${Math.floor(team.balls / 6)}.${team.balls % 6}/${state.maxOvers})`);
 
         if (state.target !== null) {
-            $('targetBadge').style.display = 'inline-block';
+            showEl('targetBadge', 'inline-block');
             const need = Math.max(0, state.target - team.score);
             const left = Math.max(0, state.maxOvers * 6 - team.balls);
-            $('targetBadge').textContent = `NEED ${need} OFF ${left}B`;
+            setText('targetBadge', `NEED ${need} OFF ${left}B`);
         } else {
-            $('targetBadge').style.display = 'none';
+            showEl('targetBadge', 'none');
         }
 
-        $('freeHitBadge').style.display = state.freeHit ? 'inline-block' : 'none';
-        $('powerplayBadge').style.display = state.powerplay ? 'inline-block' : 'none';
+        showEl('freeHitBadge', state.freeHit ? 'inline-block' : 'none');
+        showEl('powerplayBadge', state.powerplay ? 'inline-block' : 'none');
 
         const st = currentStriker(), ns = currentNonStriker(), bw = currentBowler();
-        if (st) $('strikerHud').innerHTML = `🏏 <b>${st.name}</b> ${st.batRuns} (${st.batBalls})`;
-        if (ns) $('nonStrikerHud').innerHTML = `<b>${ns.name}</b> ${ns.batRuns} (${ns.batBalls})`;
-        if (bw) $('bowlerHud').innerHTML = `⚾ <b>${bw.name}</b> ${bw.bowlWkts}/${bw.bowlRuns} (${Math.floor(bw.bowlBalls / 6)}.${bw.bowlBalls % 6})`;
+        const sh = $('strikerHud'); if (st && sh) sh.innerHTML = `🏏 <b>${st.name}</b> ${st.batRuns} (${st.batBalls})`;
+        const nh = $('nonStrikerHud'); if (ns && nh) nh.innerHTML = `<b>${ns.name}</b> ${ns.batRuns} (${ns.batBalls})`;
+        const bh = $('bowlerHud'); if (bw && bh) bh.innerHTML = `⚾ <b>${bw.name}</b> ${bw.bowlWkts}/${bw.bowlRuns} (${Math.floor(bw.bowlBalls / 6)}.${bw.bowlBalls % 6})`;
     }
 
     function renderBowlerDropdown() {
@@ -289,7 +306,7 @@
         if (!marker) return;
         marker.style.left = `${state.aimX}%`;
         marker.style.top = `${state.aimY}%`;
-        $('lengthLabel').textContent = getLengthLabelFromY(state.aimY).toUpperCase();
+        setText('lengthLabel', getLengthLabelFromY(state.aimY).toUpperCase());
     }
 
     function getLengthLabelFromY(yPct) {
@@ -453,7 +470,7 @@
 
                     // Powerplay restriction check (max 2 outside 30-yard circle)
                     if (state.powerplay && isOutsideRing(nx, ny) && !isOutsideRing(f.x, f.y) && countOutsideFielders() >= 2) {
-                        $('statusMsg').textContent = '⚠️ Powerplay rule: Max 2 fielders allowed outside the 30-yard ring!';
+                        setStatus('⚠️ Powerplay rule: Max 2 fielders allowed outside the 30-yard ring!');
                         return;
                     }
                     f.x = nx;
@@ -555,7 +572,7 @@
             fig.classList.add('running');
         }
         setCamera('bowler');
-        $('statusMsg').textContent = 'Bowler running in...';
+        setStatus('Bowler running in...');
 
         tracked(() => {
             if (fig) {
@@ -659,14 +676,12 @@
         const bounceX = delivery.extra === 'wide' ? (delivery.aimX < 50 ? 34 : 66) : delivery.aimX;
 
         const ball = $('ball'), shadow = $('ballShadow');
-        ball.style.opacity = '1';
-        shadow.style.opacity = '0.5';
-        ball.style.top = '26%';
-        ball.style.left = `${startX}%`;
+        if (ball) { ball.style.opacity = '1'; ball.style.top = '26%'; ball.style.left = `${startX}%`; }
+        if (shadow) shadow.style.opacity = '0.5';
 
         if (isLocalBatting()) {
-            $('playShotBtn').disabled = false;
-            $('runNowBtn').style.display = 'none';
+            setDisabled('playShotBtn', false);
+            showEl('runNowBtn', 'none');
             state.runRequested = false;
         }
 
@@ -674,9 +689,9 @@
         const bouncePct = ((bounceY - 26) / (84 - 26)) * 100;
 
         playBowlerRunUp(() => {
-            $('statusMsg').textContent = isLocalBatting()
+            setStatus(isLocalBatting()
                 ? 'Aim shot (Mouse/Arrows), adjust crease (WASD), press SPACE!'
-                : 'Ball in flight...';
+                : 'Ball in flight...');
 
             const startTime = performance.now();
             let bounced = false;
@@ -1163,19 +1178,19 @@
         if (checkMatchProgression()) return;
         updateHud();
         updateVisualPositions();
-        $('timingCursor').style.left = '0%';
-        $('runningPanel').style.display = 'none';
+        const tc = $('timingCursor'); if (tc) tc.style.left = '0%';
+        showEl('runningPanel', 'none');
         setCamera(state.cameraMode || 'batter');
 
         if (isLocalBatting()) {
-            $('battingControls').style.display = 'flex';
-            $('bowlingControls').style.display = 'none';
-            $('playShotBtn').disabled = true;
-            $('pitchMarker').style.display = 'none';
-            $('shotAimGuide').style.display = 'block';
+            showEl('battingControls', 'flex');
+            showEl('bowlingControls', 'none');
+            setDisabled('playShotBtn', true);
+            showEl('pitchMarker', 'none');
+            showEl('shotAimGuide', 'block');
 
             if (state.mode === 'ai') {
-                $('statusMsg').textContent = 'Set guard (WASD) & aim shot — bowler coming in...';
+                setStatus('Set guard (WASD) & aim shot — bowler coming in...');
                 if (state.autoBallTimer) clearTimeout(state.autoBallTimer);
                 state.autoBallTimer = setTimeout(() => {
                     if (isLocalBatting() && !state.ballInFlight) {
@@ -1184,14 +1199,14 @@
                 }, 1800);
             }
         } else {
-            $('battingControls').style.display = 'none';
-            $('bowlingControls').style.display = 'flex';
-            $('deliverBallBtn').disabled = false;
-            $('pitchMarker').style.display = 'block';
-            $('shotAimGuide').style.display = 'none';
+            showEl('battingControls', 'none');
+            showEl('bowlingControls', 'flex');
+            setDisabled('deliverBallBtn', false);
+            showEl('pitchMarker', 'block');
+            showEl('shotAimGuide', 'none');
             updatePitchReticle();
             renderBowlerDropdown();
-            $('statusMsg').textContent = 'Click/drag pitch to aim, drag fielders, then BOWL.';
+            setStatus('Click/drag pitch to aim, drag fielders, then BOWL.');
         }
     }
 
@@ -1289,12 +1304,12 @@
         if (state.scorecardHistory.length < 2) saveInningsScorecard();
         SoundFX.crowdRoar(true);
         const s1 = state.p1.score, s2 = state.p2.score;
-        $('resultMessage').textContent = s1 > s2 ? `YOU WON BY ${s1 - s2} RUNS!` : s2 > s1 ? `OPPONENT WON BY ${PLAYERS_PER_TEAM - 1 - state.p2.wickets} WICKETS!` : 'MATCH TIED!';
-        $('finalStats').innerHTML = `
+        setText('resultMessage', s1 > s2 ? `YOU WON BY ${s1 - s2} RUNS!` : s2 > s1 ? `OPPONENT WON BY ${PLAYERS_PER_TEAM - 1 - state.p2.wickets} WICKETS!` : 'MATCH TIED!');
+        const fs = $('finalStats'); if (fs) fs.innerHTML = `
             <div><strong>YOUR TEAM:</strong> ${state.p1.score}/${state.p1.wickets} (${Math.floor(state.p1.balls / 6)}.${state.p1.balls % 6} ov)</div>
             <div><strong>OPPONENT:</strong> ${state.p2.score}/${state.p2.wickets} (${Math.floor(state.p2.balls / 6)}.${state.p2.balls % 6} ov)</div>
         `;
-        $('resultScreen').classList.add('active');
+        const rsF = $('resultScreen'); if (rsF) rsF.classList.add('active');
     }
 
     // ==========================================
@@ -1304,6 +1319,7 @@
         const wc = $('wagonWheel');
         if (wc) {
             const ctx = wc.getContext('2d');
+            if (!ctx) { /* canvas unavailable - skip wagon wheel, keep scorecard working */ } else {
             ctx.clearRect(0, 0, wc.width, wc.height);
             ctx.fillStyle = '#0e3816';
             ctx.beginPath(); ctx.arc(90, 90, 84, 0, Math.PI * 2); ctx.fill();
@@ -1317,11 +1333,13 @@
                 ctx.lineWidth = sh.runs >= 4 ? 2.5 : 1.2;
                 ctx.beginPath(); ctx.moveTo(90, 110); ctx.lineTo(tx, ty); ctx.stroke();
             });
+            }
         }
 
         const mc = $('manhattanChart');
         if (mc) {
             const ctx = mc.getContext('2d');
+            if (!ctx) { /* canvas unavailable - skip manhattan chart */ } else {
             ctx.clearRect(0, 0, mc.width, mc.height);
             const overs = [...state.overRuns];
             if (state.currentOverRuns) overs.push(state.currentOverRuns);
@@ -1335,6 +1353,7 @@
                 ctx.fillStyle = '#fff'; ctx.font = '10px sans-serif';
                 ctx.fillText(String(r), 10 + i * bw + bw / 2 - 4, 150 - h);
             });
+            }
         }
     }
 
@@ -1449,17 +1468,17 @@
         state.scorecardHistory = [];
 
         if (!state.conditions) generateConditions();
-        $('startScreen').classList.remove('active');
-        $('resultScreen').classList.remove('active');
+        const ss0 = $('startScreen'); if (ss0) ss0.classList.remove('active');
+        const rs0 = $('resultScreen'); if (rs0) rs0.classList.remove('active');
 
         if (state.mode === 'online') {
             startInningsData('p1');
             prepareNextBall();
         } else {
-            $('tossPanel').style.display = 'block';
-            $('tossCallGroup').style.display = 'flex';
-            $('tossChoiceGroup').style.display = 'none';
-            $('tossMsg').textContent = 'Call Heads or Tails';
+            showEl('tossPanel', 'block');
+            showEl('tossCallGroup', 'flex');
+            showEl('tossChoiceGroup', 'none');
+            setText('tossMsg', 'Call Heads or Tails');
         }
     }
 
@@ -1477,13 +1496,13 @@
     bindGroup('bowlVarGroup');
     bindGroup('fieldPresetGroup', d => setFieldPreset(d.val));
 
-    $('bowlSpeedSlider').addEventListener('input', e => $('paceVal').textContent = e.target.value);
-    $('bowlerSelectDropdown').addEventListener('change', e => {
+    on('bowlSpeedSlider', 'input', e => setText('paceVal', e.target.value));
+    on('bowlerSelectDropdown', 'change', e => {
         state.currentBowlerIdx = Number(e.target.value);
         updateHud();
     });
 
-    $('deliverBallBtn').addEventListener('click', () => {
+    on('deliverBallBtn', 'click', () => {
         if (isLocalBatting() || state.ballInFlight) return;
         SoundFX.click();
         $('deliverBallBtn').disabled = true;
@@ -1503,12 +1522,12 @@
         }
     });
 
-    $('playShotBtn').addEventListener('click', triggerBatterSwing);
-    $('runNowBtn').addEventListener('click', () => {
+    on('playShotBtn', 'click', triggerBatterSwing);
+    on('runNowBtn', 'click', () => {
         if (state.pendingRun) { $('runningPanel').style.display = 'flex'; return; }
         state.runRequested = true;
         $('runNowBtn').disabled = true;
-        $('statusMsg').textContent = 'Run called!';
+        setStatus('Run called!');
     });
 
     document.querySelectorAll('#runningPanel button').forEach(btn => {
@@ -1519,12 +1538,12 @@
         btn.addEventListener('click', () => setCamera(btn.dataset.cam));
     });
 
-    $('rerollConditionsBtn').addEventListener('click', () => { SoundFX.click(); generateConditions(); });
-    $('startSoloBtn').addEventListener('click', () => { SoundFX.click(); initMatch('host'); });
-    $('restartBtn').addEventListener('click', () => {
+    on('rerollConditionsBtn', 'click', () => { SoundFX.click(); generateConditions(); });
+    on('startSoloBtn', 'click', () => { SoundFX.click(); initMatch('host'); });
+    on('restartBtn', 'click', () => {
         SoundFX.click();
-        $('resultScreen').classList.remove('active');
-        $('startScreen').classList.add('active');
+        const rs = $('resultScreen'); if (rs) rs.classList.remove('active');
+        const ss = $('startScreen'); if (ss) ss.classList.add('active');
     });
 
     document.querySelectorAll('#tossCallGroup button').forEach(btn => {
@@ -1556,20 +1575,20 @@
         });
     });
 
-    $('scorecardBtn').addEventListener('click', () => {
+    on('scorecardBtn', 'click', () => {
         renderScorecard();
         $('scorecardModal').style.display = 'flex';
     });
-    $('scorecardCloseBtn').addEventListener('click', () => $('scorecardModal').style.display = 'none');
-    $('replayBtn').addEventListener('click', replayLastBall);
-    $('soundToggleBtn').addEventListener('click', () => {
+    on('scorecardCloseBtn', 'click', () => showEl('scorecardModal', 'none'));
+    on('replayBtn', 'click', replayLastBall);
+    on('soundToggleBtn', 'click', () => {
         const m = SoundFX.toggleMute();
         $('soundToggleBtn').textContent = m ? '🔇' : '🔊';
     });
 
     // Keyboard Controls
     document.addEventListener('keydown', (e) => {
-        if ($('startScreen').classList.contains('active')) return;
+        const ssK = $('startScreen'); if (ssK && ssK.classList.contains('active')) return;
         const k = e.key.toLowerCase();
 
         if (isLocalBatting()) {
@@ -1591,7 +1610,7 @@
             }
             if (k === 'r' && (state.ballInFlight || state.shotTaken)) {
                 state.runRequested = true;
-                $('runNowBtn').disabled = true;
+                setDisabled('runNowBtn', true);
             }
         }
     });
@@ -1618,7 +1637,7 @@
         });
     }
 
-    $('createRoomBtn').addEventListener('click', () => {
+    on('createRoomBtn', 'click', () => {
         if (typeof Peer === 'undefined') return;
         const code = 'CRIC-' + Math.random().toString(36).substring(2, 6).toUpperCase();
         state.peer = new Peer(code);
@@ -1626,7 +1645,7 @@
         state.peer.on('connection', conn => setupConnection(conn, true));
     });
 
-    $('joinRoomBtn').addEventListener('click', () => {
+    on('joinRoomBtn', 'click', () => {
         const code = $('joinRoomInput').value.trim().toUpperCase();
         if (!code || typeof Peer === 'undefined') return;
         state.peer = new Peer();
