@@ -104,6 +104,10 @@
         peer: null,
         conn: null,
         cameraMode: 'batter',
+        povBowler: false,
+        endsSwapped: false,
+        contactPoint: null,
+        lastBallGround: null,
         fieldPreset: 'balanced',
         field: [],
         // Direct Pitch Aim Coordinates (x: 25..75%, y: 32..76%)
@@ -152,6 +156,34 @@
         return el;
     };
     const setText = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
+    // Ground coords: x 0..100 (left->right as seen from behind the batter),
+    // y 0..100 (bowler's end -> batter's end). Screen coords mirror both axes
+    // when the camera is behind the bowler, so the same physics works in both views.
+    const toScreen = (x, y) => state.povBowler ? { x: 100 - x, y: 100 - y } : { x, y };
+    const toGround = (x, y) => state.povBowler ? { x: 100 - x, y: 100 - y } : { x, y };
+    // The striker is the batter at the striker's end. After an odd run the two
+    // batters stay crossed, so the striker's wrapper flips between #batsman
+    // and #nonStriker (tracked by state.endsSwapped).
+    const strikerWrap = () => state.endsSwapped ? $('nonStriker') : $('batsman');
+    const otherWrap = () => state.endsSwapped ? $('batsman') : $('nonStriker');
+    // Move the bat figure into the striker's wrapper and the plain runner
+    // figure into the other wrapper (used after odd runs and on reset).
+    function placeFigures() {
+        const bf = $('batterFigure'), rf = $('nonStrikerFigure');
+        const sw = strikerWrap(), ow = otherWrap();
+        if (bf && sw && bf.parentElement !== sw) sw.appendChild(bf);
+        if (rf && ow && rf.parentElement !== ow) ow.appendChild(rf);
+    }
+    function resetEnds() {
+        if (!state.endsSwapped) return;
+        state.endsSwapped = false;
+        const pitch = $('pitch');
+        if (pitch) pitch.classList.remove('ends-swapped');
+        placeFigures();
+        const b = $('batsman'), n = $('nonStriker');
+        if (b) b.style.transform = '';
+        if (n) n.style.transform = '';
+    }
     const setStatus = (msg) => setText('statusMsg', msg);
     const showEl = (id, display) => { const el = $(id); if (el) el.style.display = display; };
     const setDisabled = (id, v) => { const el = $(id); if (el) el.disabled = v; };
@@ -304,8 +336,9 @@
     function updatePitchReticle() {
         const marker = $('pitchMarker');
         if (!marker) return;
-        marker.style.left = `${state.aimX}%`;
-        marker.style.top = `${state.aimY}%`;
+        const sc = toScreen(state.aimX, state.aimY);
+        marker.style.left = `${sc.x}%`;
+        marker.style.top = `${sc.y}%`;
         setText('lengthLabel', getLengthLabelFromY(state.aimY).toUpperCase());
     }
 
@@ -339,11 +372,12 @@
         const setAimFromPointer = (clientX, clientY) => {
             if (isLocalBatting() || state.ballInFlight) return;
             const r = stage.getBoundingClientRect();
-            const nx = ((clientX - r.left) / r.width) * 100;
-            const ny = ((clientY - r.top) / r.height) * 100;
-            // Constrain within playable pitch corridor
-            state.aimX = Math.max(36, Math.min(64, nx));
-            state.aimY = Math.max(34, Math.min(76, ny));
+            const sx = ((clientX - r.left) / r.width) * 100;
+            const sy = ((clientY - r.top) / r.height) * 100;
+            const g = toGround(sx, sy);
+            // Constrain within playable pitch corridor (ground coords)
+            state.aimX = Math.max(36, Math.min(64, g.x));
+            state.aimY = Math.max(34, Math.min(76, g.y));
             updatePitchReticle();
         };
 
@@ -449,10 +483,11 @@
         box.innerHTML = '';
         state.field.forEach(f => {
             const el = document.createElement('div');
-            el.className = 'fielder' + (f.y < 36 ? ' far' : f.y > 70 ? ' near' : '');
+            const sc = toScreen(f.x, f.y);
+            el.className = 'fielder' + (sc.y < 36 ? ' far' : sc.y > 70 ? ' near' : '');
             el.dataset.id = f.id;
-            el.style.left = `${f.x}%`;
-            el.style.top = `${f.y}%`;
+            el.style.left = `${sc.x}%`;
+            el.style.top = `${sc.y}%`;
             el.innerHTML = `<span class="fielder-head"></span><span class="fielder-body"></span><span class="fielder-label">${f.short}</span>`;
 
             let dragging = false;
@@ -465,8 +500,11 @@
                 const onMove = (ev) => {
                     if (!dragging) return;
                     const r = stage.getBoundingClientRect();
-                    const nx = Math.max(8, Math.min(92, ((ev.clientX - r.left) / r.width) * 100));
-                    const ny = Math.max(20, Math.min(88, ((ev.clientY - r.top) / r.height) * 100));
+                    const sx = ((ev.clientX - r.left) / r.width) * 100;
+                    const sy = ((ev.clientY - r.top) / r.height) * 100;
+                    const g = toGround(sx, sy);
+                    const nx = Math.max(8, Math.min(92, g.x));
+                    const ny = Math.max(20, Math.min(88, g.y));
 
                     // Powerplay restriction check (max 2 outside 30-yard circle)
                     if (state.powerplay && isOutsideRing(nx, ny) && !isOutsideRing(f.x, f.y) && countOutsideFielders() >= 2) {
@@ -475,10 +513,11 @@
                     }
                     f.x = nx;
                     f.y = ny;
-                    el.style.left = `${nx}%`;
-                    el.style.top = `${ny}%`;
-                    el.classList.toggle('far', ny < 36);
-                    el.classList.toggle('near', ny > 70);
+                    const sc2 = toScreen(nx, ny);
+                    el.style.left = `${sc2.x}%`;
+                    el.style.top = `${sc2.y}%`;
+                    el.classList.toggle('far', sc2.y < 36);
+                    el.classList.toggle('near', sc2.y > 70);
                 };
                 const onUp = () => {
                     dragging = false;
@@ -511,16 +550,23 @@
     function updateVisualPositions() {
         const guard = getActiveVal('batterGuardGroup');
         const depth = getActiveVal('footworkGroup');
-        const batEl = $('batsman');
+        // Guard / footwork shift the striker. In the bowler's view the
+        // striker is at the far end, so the shift mirrors and he shrinks.
         const batX = guard === 'off' ? -24 : guard === 'leg' ? 24 : 0;
         const batY = depth === 'advance' ? -20 : depth === 'back' ? 14 : 0;
-        batEl.style.setProperty('--batter-x', `${batX}px`);
-        batEl.style.setProperty('--batter-y', `${batY}px`);
+        const wrap = strikerWrap();
+        if (wrap) {
+            const sx = state.povBowler ? -batX : batX;
+            const sy = state.povBowler ? -batY : batY;
+            const sc = state.povBowler ? ' scale(0.55)' : '';
+            wrap.style.transform = `translate(-50%, 0) translateX(${sx}px) translateY(${sy}px)${sc}`;
+        }
 
         const angle = getActiveVal('bowlAngleGroup');
         const bowlEl = $('bowlerEnd');
+        if (!bowlEl) return;
         const bowlX = angle === 'wide' ? -22 : angle === 'round' ? 22 : -6;
-        bowlEl.style.setProperty('--bowler-x', `${bowlX}px`);
+        bowlEl.style.setProperty('--bowler-x', `${state.povBowler ? -bowlX : bowlX}px`);
     }
 
     function setCamera(mode) {
@@ -530,6 +576,27 @@
         pitch.classList.remove('cam-bowler', 'cam-batter', 'cam-broadcast');
         pitch.classList.add(`cam-${mode}`);
         document.querySelectorAll('.hud-btn[data-cam]').forEach(b => b.classList.toggle('active', b.dataset.cam === mode));
+    }
+
+    // Behind-the-bowler POV: bowler big in the foreground (bottom), batter
+    // small at the far end (top). Clears the run-up's inline top/bottom so
+    // the CSS for the new view takes over cleanly.
+    function setPOV(on) {
+        if (state.povBowler === on) return;
+        state.povBowler = on;
+        const pitch = $('pitch');
+        if (pitch) pitch.classList.toggle('pov-bowler', on);
+        showEl('povBadge', on ? 'inline-block' : 'none');
+        const be = $('bowlerEnd');
+        if (be) { be.style.top = ''; be.style.bottom = ''; }
+        updateVisualPositions();
+    }
+
+    // The camera follows the role: behind the batter when batting, behind
+    // the bowler when bowling. Called at the start of every ball.
+    function updateCameraForRole() {
+        if (isLocalBatting()) { setPOV(false); setCamera('batter'); }
+        else { setPOV(true); setCamera('bowler'); }
     }
 
     function showBanner(bigText, subText, duration = 2200) {
@@ -561,11 +628,18 @@
         };
 
         if (end) {
+            // Run-up starts further from the crease and ends just behind it.
+            // Batting view: top 13vh -> 20vh. Bowler view: bottom 24vh -> 16vh.
+            const prop = state.povBowler ? 'bottom' : 'top';
+            const other = state.povBowler ? 'top' : 'bottom';
+            const startAt = state.povBowler ? '24vh' : '13vh';
+            const endAt = state.povBowler ? '16vh' : '20vh';
             end.style.transition = 'none';
-            end.style.top = '18vh';
+            end.style[prop] = startAt;
+            end.style[other] = 'auto';
             void end.offsetWidth;
-            end.style.transition = 'transform 0.3s ease, top 1.05s linear';
-            end.style.top = '25vh';
+            end.style.transition = 'transform 0.3s ease, top 1.05s linear, bottom 1.05s linear';
+            end.style[prop] = endAt;
         }
         if (fig) {
             fig.classList.remove('delivering');
@@ -582,7 +656,10 @@
             SoundFX.bowlWhoosh();
             tracked(() => {
                 if (fig) fig.classList.remove('delivering');
-                setCamera('batter');
+                // After release the camera stays with the bowler when the
+                // user is bowling (watch it travel away), and goes back
+                // behind the batter when the user is batting.
+                setCamera(isLocalBatting() ? 'batter' : 'bowler');
                 onRelease();
             }, 280);
         }, 1050);
@@ -591,8 +668,12 @@
     function animateBallPath(from, to, durationMs, opts, onDone) {
         const ball = $('ball'), shadow = $('ballShadow');
         if (!ball) { if (onDone) onDone(); return; }
+        // from/to are ground coords; convert once so the same path works in
+        // both camera views (behind batter / behind bowler).
+        const a = toScreen(from.x, from.y), b = toScreen(to.x, to.y);
         const start = performance.now();
         const arc = (opts && opts.arc) || 0;
+        const hop = (opts && opts.hop) || 0;
         const startScale = (opts && opts.startScale) || 1.0;
         const endScale = (opts && opts.endScale) || 0.85;
 
@@ -601,10 +682,15 @@
 
         function step(now) {
             const t = Math.min(1, (now - start) / durationMs);
-            const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-            const x = from.x + (to.x - from.x) * e;
-            const y = from.y + (to.y - from.y) * e;
-            const lift = -Math.sin(t * Math.PI) * arc;
+            // 'out' = fast off the bat, decelerating (a struck ball);
+            // default easeInOut for throws and the ball coming back.
+            const e = (opts && opts.easing === 'out') ? 1 - Math.pow(1 - t, 3)
+                : t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            const x = a.x + (b.x - a.x) * e;
+            const y = a.y + (b.y - a.y) * e;
+            // arc = loft; hop = a second bounce for ground shots (ball dips,
+            // touches down mid-way, then rises again towards the fielder).
+            const lift = -Math.sin(t * Math.PI) * arc - Math.abs(Math.sin(t * Math.PI * 2)) * hop * (1 - t * 0.5);
             const scale = startScale + (endScale - startScale) * e;
 
             ball.style.left = `${x}%`;
@@ -626,7 +712,8 @@
     function throwBallBackToBowler(onDone) {
         const ball = $('ball');
         if (!ball) { if (onDone) onDone(); return; }
-        const cur = { x: parseFloat(ball.style.left) || 50, y: parseFloat(ball.style.top) || 45 };
+        const curS = { x: parseFloat(ball.style.left) || 50, y: parseFloat(ball.style.top) || 45 };
+        const cur = toGround(curS.x, curS.y);
         animateBallPath(cur, { x: 50, y: 26 }, 700, { arc: 18, startScale: 0.85, endScale: 0.55 }, () => {
             ball.style.opacity = '0';
             if ($('ballShadow')) $('ballShadow').style.opacity = '0';
@@ -646,6 +733,12 @@
         if (pct >= sweetMin && pct <= sweetMax) return 'perfect';
         if ((pct >= sweetMin - 15 && pct < sweetMin) || (pct > sweetMax && pct <= sweetMax + 10)) return 'good';
         return pct < sweetMin ? 'early' : 'late';
+    }
+
+    function variationLabel(v) {
+        return v === 'legspin' ? 'Leg-spin!' : v === 'offspin' ? 'Off-spin!'
+            : v === 'inswing' ? 'In-swing!' : v === 'outswing' ? 'Out-swing!'
+            : v === 'seam' ? 'Seam!' : '';
     }
 
     function launchBallFlight(delivery, aiBatterShot = null) {
@@ -676,7 +769,8 @@
         const bounceX = delivery.extra === 'wide' ? (delivery.aimX < 50 ? 34 : 66) : delivery.aimX;
 
         const ball = $('ball'), shadow = $('ballShadow');
-        if (ball) { ball.style.opacity = '1'; ball.style.top = '26%'; ball.style.left = `${startX}%`; }
+        const startScreen = toScreen(startX, 26);
+        if (ball) { ball.style.opacity = '1'; ball.style.top = `${startScreen.y}%`; ball.style.left = `${startScreen.x}%`; }
         if (shadow) shadow.style.opacity = '0.5';
 
         if (isLocalBatting()) {
@@ -685,13 +779,19 @@
             state.runRequested = false;
         }
 
-        const flightDurationMs = Math.max(1450, 2850 - (delivery.speed * 9));
-        const bouncePct = ((bounceY - 26) / (84 - 26)) * 100;
+        // Spin is bowled slower and grips/bounces more than pace.
+        const isSpinDel = ['spin', 'legspin', 'offspin'].includes(delivery.variation);
+        const effSpeed = isSpinDel ? Math.round(delivery.speed * 0.88) : delivery.speed;
+        const flightDurationMs = Math.max(1450, 2850 - (effSpeed * 9));
+        // bouncePct is measured on SCREEN: in the bowler's view the bounce
+        // point mirrors vertically.
+        const bounceScreenY = toScreen(bounceX, bounceY).y;
+        const bouncePct = ((bounceScreenY - 26) / (84 - 26)) * 100;
 
         playBowlerRunUp(() => {
             setStatus(isLocalBatting()
                 ? 'Aim shot (Mouse/Arrows), adjust crease (WASD), press SPACE!'
-                : 'Ball in flight...');
+                : `${variationLabel(delivery.variation)} Ball in flight...`);
 
             const startTime = performance.now();
             let bounced = false;
@@ -701,19 +801,24 @@
                 const elapsed = now - startTime;
                 const pct = Math.min(100, (elapsed / flightDurationMs) * 100);
                 state.flightProgress = pct;
-                $('timingCursor').style.left = `${pct}%`;
+                const tc = $('timingCursor'); if (tc) tc.style.left = `${pct}%`;
 
-                const yTop = 26 + (pct * 0.58); // 26% -> 84%
-                let xPos = startX;
+                // Physics runs in GROUND coords (bowler's end y=26 -> batter y=84);
+                // only the drawing mirrors for the bowler's view.
+                const yGround = 26 + (pct * 0.58);
+                let xGround = startX;
                 const cond = state.conditions;
                 const windDrift = cond ? cond.windLateral * (cond.windKmh / 25) * 3.5 * (pct / 100) : 0;
 
                 if (pct < bouncePct) {
                     const pre = pct / Math.max(1, bouncePct);
-                    // Late air swing before pitching
+                    // Drift / swing in the air before pitching. Leg-spin drifts
+                    // away and turns to off; off-spin drifts in and turns to leg.
                     const airSwing = delivery.variation === 'inswing' ? 2.5 * pre * pre :
-                                     delivery.variation === 'outswing' ? -2.5 * pre * pre : 0;
-                    xPos = startX + (bounceX - startX) * pre + airSwing;
+                                     delivery.variation === 'outswing' ? -2.5 * pre * pre :
+                                     delivery.variation === 'legspin' ? -1.8 * pre * pre :
+                                     delivery.variation === 'offspin' ? 1.8 * pre * pre : 0;
+                    xGround = startX + (bounceX - startX) * pre + airSwing;
                 } else {
                     if (!bounced) {
                         bounced = true;
@@ -722,32 +827,42 @@
                     const post = (pct - bouncePct) / Math.max(1, 100 - bouncePct);
                     const angleContinue = (bounceX - startX) * 0.25;
                     let seamTurn = 0;
-                    if (delivery.variation === 'inswing' || delivery.variation === 'spin') seamTurn = 3.8;
-                    if (delivery.variation === 'outswing') seamTurn = -3.8;
-                    if (delivery.variation === 'seam') seamTurn = (Math.random() < 0.5 ? 1.5 : -1.5);
-                    xPos = bounceX + (angleContinue + seamTurn) * post;
+                    if (delivery.variation === 'inswing') seamTurn = 3.8;
+                    else if (delivery.variation === 'outswing') seamTurn = -3.8;
+                    else if (delivery.variation === 'legspin') seamTurn = -5.2; // turns to off
+                    else if (delivery.variation === 'offspin' || delivery.variation === 'spin') seamTurn = 5.2; // turns to leg
+                    else if (delivery.variation === 'seam') seamTurn = (Math.random() < 0.5 ? 1.5 : -1.5);
+                    xGround = bounceX + (angleContinue + seamTurn) * post;
                 }
-                xPos += windDrift;
+                xGround += windDrift;
 
-                const bounceHeight = bounceY < 45 ? 16 : bounceY > 68 ? 4 : 10;
+                const bounceHeight = (bounceY < 45 ? 16 : bounceY > 68 ? 4 : 10) + (isSpinDel ? 5 : 0);
                 const lift = pct > bouncePct
                     ? -Math.sin(Math.min(1, (pct - bouncePct) / (100 - bouncePct)) * Math.PI) * bounceHeight
                     : 0;
-                const scale = 0.52 + (pct * 0.0068);
+                // The ball grows as it comes towards the camera, shrinks as it
+                // travels away (bowler's view).
+                const scale = state.povBowler ? 1.2 - (pct * 0.0068) : 0.52 + (pct * 0.0068);
+                const scr = toScreen(xGround, yGround);
+                state.lastBallGround = { x: xGround, y: yGround };
 
-                ball.style.left = `${xPos}%`;
-                ball.style.top = `${yTop}%`;
-                ball.style.transform = `translate(-50%, -50%) translateY(${lift}px) scale(${scale.toFixed(2)})`;
+                if (ball) {
+                    ball.style.left = `${scr.x}%`;
+                    ball.style.top = `${scr.y}%`;
+                    ball.style.transform = `translate(-50%, -50%) translateY(${lift}px) scale(${scale.toFixed(2)})`;
+                }
+                if (shadow) {
+                    shadow.style.left = `${scr.x}%`;
+                    shadow.style.top = `${scr.y + 1.2}%`;
+                    shadow.style.opacity = lift < -6 ? '0.28' : '0.52';
+                }
 
-                shadow.style.left = `${xPos}%`;
-                shadow.style.top = `${yTop + 1.2}%`;
-                shadow.style.opacity = lift < -6 ? '0.28' : '0.52';
-
-                state.replayFrames.push({ x: xPos, y: yTop, lift, scale });
+                state.replayFrames.push({ x: xGround, y: yGround, lift, scale });
 
                 if (aiBatterShot && !aiSwung && pct >= 78) {
                     aiSwung = true;
                     state.shotTaken = true;
+                    state.contactPoint = { ...state.lastBallGround };
                     finishFlightAndResolve(delivery, aiBatterShot);
                     return;
                 }
@@ -756,10 +871,14 @@
 
                 if (pct >= 100) {
                     state.ballInFlight = false;
-                    ball.style.opacity = '0';
-                    shadow.style.opacity = '0';
-                    if (isLocalBatting()) {
-                        $('playShotBtn').disabled = true;
+                    // The ball is NOT hidden here when the user is batting:
+                    // the leave is resolved through finishFlightAndResolve,
+                    // which carries the ball on to the keeper / stumps.
+                    if (!isLocalBatting()) {
+                        if (ball) ball.style.opacity = '0';
+                        if (shadow) shadow.style.opacity = '0';
+                    } else {
+                        setDisabled('playShotBtn', true);
                         submitBatterShot({
                             guard: getActiveVal('batterGuardGroup'),
                             footwork: getActiveVal('footworkGroup'),
@@ -779,6 +898,12 @@
     function triggerBatterSwing() {
         if (!state.ballInFlight || state.shotTaken || !isLocalBatting()) return;
         state.shotTaken = true;
+        // The ball is struck from exactly where it is NOW (not from a fixed
+        // spot in front of the stumps) -- that is the contact point the
+        // post-hit ball travels from.
+        state.contactPoint = state.lastBallGround ? { ...state.lastBallGround } : null;
+        const halo = $('timingHalo');
+        if (halo) { halo.classList.remove('impact'); void halo.offsetWidth; halo.classList.add('impact'); }
         $('playShotBtn').disabled = true;
         $('runNowBtn').style.display = 'inline-block';
         $('runNowBtn').disabled = false;
@@ -832,6 +957,11 @@
         if (shot.type === 'leave') {
             const stumpsExposed = shot.guard === 'leg' && lineCat !== 'off';
             if ((lineCat === 'middle' || stumpsExposed) && lengthCat !== 'short') {
+                // Bowled off a no-ball is NOT out (stumps still fly, +1, free hit).
+                if (delivery.extra === 'noball') {
+                    state.extras.noBalls += 1;
+                    return { isOut: false, runs: 1, commentary: 'BOWLED off a no-ball — not out! +1 & FREE HIT next ball!', extra: 'noball', legal: false, freeHitNext: true, landing: { x: 50, y: 88 } };
+                }
                 return { isOut: true, runs: 0, commentary: 'BOWLED! Left a straight one!' };
             }
             return { isOut: false, runs: 0, commentary: 'Well left through to the keeper.' };
@@ -859,6 +989,7 @@
         if (shot.type === 'defend') outChance -= 0.04;
         if (shot.timing === 'early' || shot.timing === 'late') outChance += 0.22;
         if (shot.timing === 'perfect') outChance -= 0.06;
+        if (['legspin', 'offspin'].includes(delivery.variation) && shot.footwork === 'advance') outChance += 0.05;
         if (bw) outChance += (bw.bowlSkill - 70) * 0.002;
         if (state.freeHit) outChance = 0;
 
@@ -871,7 +1002,7 @@
         if (Math.random() < outChance) {
             isOut = true;
             if (lengthCat === 'yorker' && shot.type === 'loft') commentary = 'BOWLED! Timber shattered by a yorker!';
-            else if (shot.footwork === 'advance' && delivery.variation === 'spin') commentary = 'STUMPED! Beaten in the flight!';
+            else if (shot.footwork === 'advance' && ['spin', 'legspin', 'offspin'].includes(delivery.variation)) commentary = 'STUMPED! Beaten in the flight!';
             else if (near.fielder && (shot.type === 'loft' || shot.type === 'cutpull')) commentary = `CAUGHT by ${near.fielder.short}!`;
             else commentary = 'EDGED & CAUGHT behind!';
         } else {
@@ -913,6 +1044,9 @@
             };
         }
 
+        // Beaten all ends up: no contact, ball carries through to the keeper.
+        const beaten = !isOut && runs === 0 && (shot.timing === 'early' || shot.timing === 'late')
+            && shot.type !== 'defend' && shot.type !== 'leave';
         return {
             runs,
             isOut,
@@ -920,6 +1054,8 @@
             landing,
             nearestFielder: near.fielder,
             nearestDist: near.dist,
+            caughtBy: (isOut && near.fielder && (shot.type === 'loft' || shot.type === 'cutpull')) ? near.fielder : null,
+            beaten,
             gap: near.dist > 20,
             legal: true,
             extra: null
@@ -929,9 +1065,15 @@
     function finishFlightAndResolve(delivery, shot, precomputed = null) {
         if (state.flightAnimId) cancelAnimationFrame(state.flightAnimId);
         state.ballInFlight = false;
-        $('ballShadow').style.opacity = '0';
+        const sh = $('ballShadow'); if (sh) sh.style.opacity = '0';
+        // The post-hit ball starts from the exact contact point (ground coords).
+        const startPt = state.contactPoint || state.lastBallGround || { x: 50, y: 82 };
+        state.contactPoint = null;
 
         if (shot.type !== 'leave') {
+            // Sound + swing happen AT contact, not seconds later.
+            if (shot.type === 'defend') SoundFX.batDefend();
+            else SoundFX.batCrack(shot.timing === 'perfect' ? 1.3 : 1.0);
             const fig = $('batterFigure');
             if (fig) {
                 fig.classList.remove('anim-defend', 'anim-ground', 'anim-cutpull', 'anim-sweep', 'anim-loft');
@@ -946,9 +1088,9 @@
 
         if (isRunningHit) {
             if (state.mode === 'online') {
-                applyRunningOutcome(delivery, shot, outcome, outcome.runs, false, outcome.runs);
+                applyRunningOutcome(delivery, shot, outcome, outcome.runs, false, outcome.runs, startPt);
             } else {
-                startRunningPhase(delivery, shot, outcome);
+                startRunningPhase(delivery, shot, outcome, startPt);
             }
             return;
         }
@@ -958,48 +1100,86 @@
             state.runRequested = false;
             if (calledRun) {
                 outcome.runs = 1;
-                startRunningPhase(delivery, shot, outcome);
+                startRunningPhase(delivery, shot, outcome, startPt);
                 return;
             }
             applyOutcomeNow(delivery, shot, outcome);
-        });
+        }, startPt);
     }
 
-    function animateBallToOutcome(outcome, shot, onDone) {
+    function animateBallToOutcome(outcome, shot, onDone, startPt) {
         setCamera('broadcast');
+        const start = startPt || { x: 50, y: 82 };
         const landing = outcome.landing || computeLanding360(shot);
         const isBoundary = outcome.runs >= 4;
-        const endPt = isBoundary
-            ? { x: Math.max(4, Math.min(96, landing.x + (landing.x - 50) * 0.3)), y: Math.max(18, landing.y - 6) }
-            : landing;
-
-        if (outcome.nearestFielder) {
-            const el = document.querySelector(`.fielder[data-id="${outcome.nearestFielder.id}"]`);
-            if (el) {
-                el.classList.add('chasing');
-                el.style.left = `${endPt.x}%`;
-                el.style.top = `${endPt.y}%`;
-                setTimeout(() => {
-                    el.classList.remove('chasing');
-                    el.style.left = `${outcome.nearestFielder.x}%`;
-                    el.style.top = `${outcome.nearestFielder.y}%`;
-                }, 1400);
-            }
+        // Where the ball ends up depends on what happened: stumps (bowled),
+        // keeper's gloves (leave / beaten / edge behind), a fielder's hands
+        // (caught), or the landing spot (fielded / boundary).
+        let endPt = landing, mode = 'field';
+        if (outcome.commentary && outcome.commentary.includes('BOWLED')) {
+            endPt = { x: 50, y: 84 }; mode = 'bowled';
+        } else if (shot.type === 'leave' || outcome.beaten ||
+            (outcome.isOut && outcome.commentary && (outcome.commentary.includes('behind') || outcome.commentary.includes('STUMPED')))) {
+            endPt = { x: 50, y: 89 }; mode = 'keeper';
+        } else if (outcome.isOut && outcome.caughtBy) {
+            endPt = { x: outcome.caughtBy.x, y: outcome.caughtBy.y }; mode = 'catch';
+        } else if (isBoundary) {
+            endPt = { x: Math.max(4, Math.min(96, landing.x + (landing.x - 50) * 0.3)), y: Math.max(18, landing.y - 6) };
         }
 
-        animateBallPath({ x: 50, y: 82 }, endPt, isBoundary ? 1100 : 850, { arc: isBoundary ? 34 : 10, startScale: 1.15, endScale: 0.7 }, () => {
+        // Arc + bounce depend on the shot: lofts fly, ground shots skid/bounce.
+        const arc = mode === 'keeper' ? 4 : shot.type === 'loft' ? 42 : shot.type === 'cutpull' ? 20
+            : shot.type === 'sweep' ? 16 : shot.type === 'ground' ? 7 : 4;
+        const hop = (mode === 'field' && (shot.type === 'ground' || shot.type === 'defend')) ? 9 : 0;
+        const ballDur = mode === 'keeper' ? 550 : isBoundary ? 1100 : 850;
+
+        // The nearest fielder runs to the ball and arrives with it (chase
+        // duration matched to the ball), instead of teleporting there.
+        const fielderEl = (mode === 'field' || mode === 'catch') && outcome.nearestFielder
+            ? document.querySelector(`.fielder[data-id="${outcome.nearestFielder.id}"]`) : null;
+        if (fielderEl) {
+            const endS = toScreen(endPt.x, endPt.y);
+            fielderEl.classList.add('chasing');
+            fielderEl.style.transitionDuration = `${ballDur}ms`;
+            fielderEl.style.left = `${endS.x}%`;
+            fielderEl.style.top = `${endS.y}%`;
+        }
+
+        animateBallPath(start, endPt, ballDur, { arc: arc + (isBoundary ? 10 : 0), hop, easing: 'out', startScale: 1.15, endScale: mode === 'keeper' ? 0.9 : 0.7 }, () => {
+            // On arrival the ball is HELD: a catch, a keeper take, or a
+            // fielder gathering it -- it does not instantly fly back.
+            if (mode === 'catch' && fielderEl) {
+                fielderEl.classList.remove('chasing');
+                fielderEl.classList.add('catching');
+                showBanner('OUT!', outcome.commentary);
+                SoundFX.crowdRoar(false);
+            }
+            if (mode === 'keeper') {
+                const k = $('keeper');
+                if (k) { k.classList.add('diving'); setTimeout(() => k.classList.remove('diving'), 700); }
+                if (outcome.isOut) showBanner('OUT!', outcome.commentary);
+            }
+            if (mode === 'bowled') showBanner('OUT!', outcome.commentary);
+            const holdMs = mode === 'catch' ? 950 : mode === 'keeper' ? 500 : mode === 'bowled' ? 550 : 350;
             setTimeout(() => {
+                if (fielderEl) {
+                    fielderEl.classList.remove('catching', 'chasing');
+                    fielderEl.style.transitionDuration = '';
+                    const home = toScreen(outcome.nearestFielder.x, outcome.nearestFielder.y);
+                    fielderEl.style.left = `${home.x}%`;
+                    fielderEl.style.top = `${home.y}%`;
+                }
                 if (state.runRequested && state.mode === 'ai' && outcome.runs === 0 && !outcome.isOut && !outcome.extra) {
                     if (onDone) onDone();
                     return;
                 }
                 throwBallBackToBowler(onDone);
-            }, 550);
+            }, holdMs);
         });
     }
 
-    function startRunningPhase(delivery, shot, outcome) {
-        state.pendingRun = { delivery, shot, outcome };
+    function startRunningPhase(delivery, shot, outcome, startPt) {
+        state.pendingRun = { delivery, shot, outcome, startPt };
         const dist = Math.round(outcome.nearestDist || 25);
         $('runningMsg').textContent = `Gap found (${dist}m)! Call runs:`;
 
@@ -1032,25 +1212,69 @@
         const runOut = attempted > 0 && Math.random() < runOutChance;
         const completed = attempted === 0 ? 0 : runOut ? attempted - 1 : attempted;
 
-        applyRunningOutcome(delivery, shot, outcome, attempted, runOut, completed);
+        applyRunningOutcome(delivery, shot, outcome, attempted, runOut, completed, pending.startPt);
     }
 
-    function applyRunningOutcome(delivery, shot, outcome, attempted, runOut, completed) {
+    function applyRunningOutcome(delivery, shot, outcome, attempted, runOut, completed, startPt) {
         setCamera('broadcast');
         const landing = outcome.landing || { x: 50, y: 45 };
-        animateBallPath({ x: 50, y: 82 }, landing, 850, { arc: 10, startScale: 1.15, endScale: 0.85 }, () => {
-            throwBallBackToBowler();
+        const start = startPt || { x: 50, y: 82 };
+        const runMs = Math.max(0, attempted * state.runCrossMs);
+        // The ball races to the nearest fielder while the batters run. The
+        // fielder holds it until the running is finished, then throws back.
+        const fielderEl = outcome.nearestFielder
+            ? document.querySelector(`.fielder[data-id="${outcome.nearestFielder.id}"]`) : null;
+        if (fielderEl && attempted > 0) {
+            const endS = toScreen(landing.x, landing.y);
+            fielderEl.classList.add('chasing');
+            fielderEl.style.transitionDuration = '850ms';
+            fielderEl.style.left = `${endS.x}%`;
+            fielderEl.style.top = `${endS.y}%`;
+        }
+        animateBallPath(start, landing, 850, { arc: shot.type === 'loft' ? 30 : 10, hop: shot.type === 'ground' ? 9 : 0, easing: 'out', startScale: 1.15, endScale: 0.85 }, () => {
+            setTimeout(() => {
+                if (fielderEl) {
+                    fielderEl.classList.remove('chasing');
+                    fielderEl.style.transitionDuration = '';
+                    const home = toScreen(outcome.nearestFielder.x, outcome.nearestFielder.y);
+                    fielderEl.style.left = `${home.x}%`;
+                    fielderEl.style.top = `${home.y}%`;
+                }
+                throwBallBackToBowler();
+            }, Math.max(250, runMs - 850));
         });
 
-        const bat = $('batsman'), ns = $('nonStriker');
+        // --- Running: both batters glide the FULL pitch, one cross per run
+        // (~1.15s each), legs striding, crossing mid-pitch. After an odd
+        // number of runs they stay crossed: the ends swap and the bat figure
+        // moves to the striker's end, ready for the next ball.
+        const bat = strikerWrap(), ns = otherWrap();
         if (attempted > 0 && bat && ns) {
+            const batFig = bat.querySelector('.player'), nsFig = ns.querySelector('.player');
+            const batDelta = state.povBowler ? 51 : -58; // vh: striker's end -> bowler's end
+            const nsDelta = state.povBowler ? -51 : 51;
+            bat.classList.add('running-exchange'); ns.classList.add('running-exchange');
+            if (batFig) batFig.classList.add('sprinting');
+            if (nsFig) nsFig.classList.add('sprinting');
             let swapped = false;
             const cross = (n) => {
                 swapped = !swapped;
-                bat.style.transform = swapped ? 'translate(-50%, 0) translateY(-290px)' : '';
-                ns.style.transform = swapped ? 'translate(-50%, 0) translateY(290px)' : '';
+                bat.style.transform = swapped ? `translate(-50%, 0) translateY(${batDelta}vh)` : 'translate(-50%, 0) translateY(0)';
+                ns.style.transform = swapped ? `translate(-50%, 0) translateY(${nsDelta}vh)` : 'translate(-50%, 0) translateY(0)';
                 if (n < attempted) setTimeout(() => cross(n + 1), state.runCrossMs);
-                else setTimeout(() => { bat.style.transform = ''; ns.style.transform = ''; }, state.runCrossMs);
+                else setTimeout(() => {
+                    bat.classList.remove('running-exchange'); ns.classList.remove('running-exchange');
+                    if (batFig) batFig.classList.remove('sprinting');
+                    if (nsFig) nsFig.classList.remove('sprinting');
+                    if (attempted % 2 === 1) {
+                        state.endsSwapped = !state.endsSwapped;
+                        const pitch = $('pitch');
+                        if (pitch) pitch.classList.toggle('ends-swapped', state.endsSwapped);
+                        placeFigures();
+                    }
+                    bat.style.transform = ''; ns.style.transform = '';
+                    updateVisualPositions();
+                }, state.runCrossMs);
             };
             cross(1);
         }
@@ -1078,18 +1302,14 @@
             }
         } else if (outcome.runs >= 6) {
             umpireSignal('six');
-            SoundFX.batCrack(1.3);
             SoundFX.crowdRoar(true);
             showBanner('SIX!', outcome.commentary);
         } else if (outcome.runs === 4) {
             umpireSignal('four');
-            SoundFX.batCrack(1.15);
             SoundFX.crowdRoar(true);
             showBanner('FOUR!', outcome.commentary);
         } else {
             if (outcome.extra === 'wide' || outcome.extra === 'noball') umpireSignal('wide');
-            if (outcome.runs > 0) SoundFX.batCrack(0.95);
-            else if (shot.type !== 'leave') SoundFX.batDefend();
             showBanner('', outcome.commentary);
         }
 
@@ -1177,10 +1397,10 @@
     function prepareNextBall() {
         if (checkMatchProgression()) return;
         updateHud();
+        updateCameraForRole();
         updateVisualPositions();
         const tc = $('timingCursor'); if (tc) tc.style.left = '0%';
         showEl('runningPanel', 'none');
-        setCamera(state.cameraMode || 'batter');
 
         if (isLocalBatting()) {
             showEl('battingControls', 'flex');
@@ -1219,9 +1439,12 @@
 
     function generateAIDelivery() {
         const bw = currentBowler();
-        const baseSpeed = bw ? Math.round(110 + bw.bowlSkill * 0.34) : 128;
+        const isSpinBowler = bw && bw.bowlType === 'spin';
+        const baseSpeed = bw ? (isSpinBowler ? Math.round(92 + bw.bowlSkill * 0.22) : Math.round(110 + bw.bowlSkill * 0.34)) : 128;
         const angle = pick(['over', 'wide', 'round']);
-        const variation = pick(['seam', 'inswing', 'outswing', 'spin']);
+        const variation = isSpinBowler
+            ? pick(['legspin', 'offspin', 'legspin', 'offspin', 'seam'])
+            : pick(['seam', 'seam', 'inswing', 'outswing', 'legspin', 'offspin']);
         let aimX = 42 + Math.floor(Math.random() * 17); // 42..58%
         let aimY = 38 + Math.floor(Math.random() * 35); // 38..73%
 
@@ -1387,7 +1610,6 @@
         if (state.replaying || !state.replayFrames.length || state.ballInFlight) return;
         state.replaying = true;
         $('replayBtn').disabled = true;
-        setCamera('batter');
         const ball = $('ball');
         const frames = state.replayFrames;
         const start = performance.now();
@@ -1398,8 +1620,9 @@
             const t = Math.min(1, (now - start) / duration);
             const f = frames[Math.min(frames.length - 1, Math.floor(t * frames.length))];
             if (f) {
-                ball.style.left = `${f.x}%`;
-                ball.style.top = `${f.y}%`;
+                const sc = toScreen(f.x, f.y);
+                ball.style.left = `${sc.x}%`;
+                ball.style.top = `${sc.y}%`;
                 ball.style.transform = `translate(-50%, -50%) translateY(${f.lift}px) scale(${f.scale})`;
             }
             if (t < 1) requestAnimationFrame(step);
@@ -1407,6 +1630,7 @@
                 state.replaying = false;
                 ball.style.opacity = '0';
                 $('replayBtn').disabled = false;
+                updateCameraForRole();
             }
         }
         requestAnimationFrame(step);
@@ -1451,6 +1675,7 @@
         state.currentBowlerIdx = 0; state.lastBowlerIdx = -1;
         state.overRuns = []; state.currentOverRuns = 0; state.wagonShots = [];
         state.freeHit = false;
+        resetEnds();
         updatePowerplay();
         setFieldPreset('balanced');
         renderBowlerDropdown();
@@ -1493,7 +1718,16 @@
     bindGroup('footworkGroup');
     bindGroup('shotTypeGroup');
     bindGroup('bowlAngleGroup');
-    bindGroup('bowlVarGroup');
+    bindGroup('bowlVarGroup', d => {
+        const hints = {
+            seam: 'Seam — nibbles either way off the pitch',
+            inswing: 'In-swing — curves into the right-hander',
+            outswing: 'Out-swing — curves away from the right-hander',
+            legspin: 'Leg-spin — pitches on leg, turns to off (away from the bat)',
+            offspin: 'Off-spin — pitches on off, turns to leg (into the bat)'
+        };
+        setText('bowlHint', hints[d.val] || 'Click/drag pitch spot to aim • Drag fielders to set field');
+    });
     bindGroup('fieldPresetGroup', d => setFieldPreset(d.val));
 
     on('bowlSpeedSlider', 'input', e => setText('paceVal', e.target.value));
@@ -1508,7 +1742,7 @@
         $('deliverBallBtn').disabled = true;
         const delivery = {
             angle: getActiveVal('bowlAngleGroup'),
-            variation: getActiveVal('bowlVarGroup'),
+            variation: getActiveVal('bowlVarGroup') === 'spin' ? 'offspin' : getActiveVal('bowlVarGroup'),
             aimX: state.aimX,
             aimY: state.aimY,
             speed: Number($('bowlSpeedSlider').value)
