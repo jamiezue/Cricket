@@ -254,3 +254,410 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
     .setup-grid { grid-template-columns: 1fr; }
     .scoreboard { flex-direction: column; gap: 8px; }
 }
+/* ============================================================
+   PERSPECTIVE VIEW — behind the bowler / behind-top of batter
+   Overrides the old flat left-to-right pitch. Later rules win.
+   ============================================================ */
+
+/* Camera controls */
+.camera-controls {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 10px; justify-content: center;
+}
+.camera-label-text { font-size: 0.82rem; font-weight: 700; color: #90a4ae; }
+.cam-btn {
+    padding: 7px 12px; background: rgba(255,255,255,0.07);
+    border: 1px solid var(--border); color: #fff; border-radius: 20px;
+    cursor: pointer; font-size: 0.82rem; font-weight: 700;
+    transition: background 0.2s, transform 0.2s;
+}
+.cam-btn:hover { transform: translateY(-1px); }
+.cam-btn.active { background: #1976d2; border-color: #42a5f5; }
+.camera-hint { font-size: 0.75rem; color: #78909c; }
+
+/* --- Pitch: vertical, far end narrow, near end wide --- */
+.pitch {
+    position: relative; height: 470px; max-width: 660px; margin: 0 auto;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.14), transparent 55%),
+        linear-gradient(180deg, #1b5e20 0%, #2e7d32 28%, #388e3c 62%, #2e7d32 100%);
+    border-radius: 12px; border: 2px solid rgba(255,255,255,0.25);
+    overflow: hidden; perspective: 900px;
+}
+.camera-stage {
+    position: absolute; inset: 0;
+    transform-origin: 50% 82%;
+    transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+}
+/* Behind the bowling wicket: zoom into the far end, bowler big */
+.pitch.cam-bowler .camera-stage { transform: scale(1.5) translateY(24%); transform-origin: 50% 14%; }
+/* Behind-top of the batter: batter big in the foreground, bowler small in the distance */
+.pitch.cam-batter .camera-stage { transform: scale(1.16) translateY(-5%); transform-origin: 50% 86%; }
+/* Broadcast: whole pitch, no zoom */
+.pitch.cam-broadcast .camera-stage { transform: scale(1) translateY(0); }
+
+.camera-label {
+    position: absolute; left: 10px; top: 10px; z-index: 20;
+    background: rgba(0,0,0,0.55); padding: 5px 10px; border-radius: 20px;
+    font-size: 0.75rem; font-weight: 700; color: #ffe57f; pointer-events: none;
+}
+
+.outfield {
+    position: absolute; inset: 0;
+    background:
+        radial-gradient(circle at 50% 108%, rgba(255,255,255,0.10), transparent 45%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 46px, transparent 46px 92px);
+}
+.pitch-strip {
+    position: absolute; top: 3%; bottom: 3%; left: 50%;
+    width: 46%; transform: translateX(-50%);
+    clip-path: polygon(32% 0, 68% 0, 100% 100%, 0 100%);
+    background:
+        repeating-linear-gradient(180deg, rgba(255,255,255,0.05) 0 26px, transparent 26px 52px),
+        linear-gradient(180deg, #c9a06a 0%, #b89a6e 45%, #a1887f 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+}
+.crease-line {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    height: 3px; background: rgba(255,255,255,0.9); border-radius: 2px; z-index: 2;
+}
+.bowler-crease { top: 9.5%; width: 15%; }
+.batter-crease { top: 86%; width: 34%; }
+.crease.left, .crease.right { display: none; } /* old horizontal creases */
+
+.hitting-zone {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: 68%; width: 52%; height: 22%;
+    background: rgba(102,187,106,0.18);
+    border-top: 1px dashed rgba(102,187,106,0.8);
+    clip-path: polygon(18% 0, 82% 0, 100% 100%, 0 100%);
+    right: auto; bottom: auto;
+}
+
+/* Stumps — 3 sticks each, small far, large near */
+.stumps { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 3px; z-index: 3; }
+.stumps span { display: block; width: 4px; background: linear-gradient(180deg, #fff59d, #fdd835); border-radius: 2px; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+.stumps-top { top: 6.5%; }
+.stumps-top span { height: 18px; }
+.stumps-bottom { top: 87.5%; }
+.stumps-bottom span { height: 34px; width: 6px; }
+.stumps.left, .stumps.right { display: none; }
+
+/* Pitch / bounce marker — now positioned along the vertical pitch */
+.pitch-marker {
+    position: absolute; width: 18px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--accent); background: rgba(255,215,0,0.30);
+    top: 60%; left: 50%; transform: translate(-50%, -50%);
+    opacity: 0; transition: opacity 0.15s; z-index: 4;
+}
+
+/* --- Players: shared figure parts --- */
+.player { position: relative; }
+.p-head {
+    position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+    border-radius: 50%; background: #e8b98a; z-index: 3;
+    box-shadow: inset -2px -3px 0 rgba(0,0,0,0.18);
+}
+.p-torso { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 8px 8px 6px 6px; z-index: 2; }
+.p-arm { position: absolute; border-radius: 4px; transform-origin: top center; }
+.p-legs { position: absolute; left: 50%; transform: translateX(-50%); z-index: 1; }
+.p-leg { position: absolute; top: 0; border-radius: 4px; transform-origin: top center; }
+.p-shadow {
+    position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%);
+    height: 8px; border-radius: 50%; background: rgba(0,0,0,0.35); filter: blur(2px); z-index: 0;
+}
+.player-label {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: 0.62rem; font-weight: 800; letter-spacing: 1.5px; color: rgba(255,255,255,0.92);
+    background: rgba(0,0,0,0.45); padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+}
+
+/* --- BOWLER (far end, small, facing the camera / batter) --- */
+.bowler-end {
+    position: absolute; top: 11%; left: 50%; z-index: 6;
+    transform: translate(-50%, 0) translateX(var(--bowler-x, 0px));
+    transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+    font-size: 1rem;
+}
+.bowler-figure { width: 48px; height: 82px; }
+.bowler-figure .p-head { width: 22px; height: 22px; top: 0; }
+.bowler-figure .p-head .cap {
+    position: absolute; left: 0; right: 0; top: -2px; height: 11px;
+    background: #0d47a1; border-radius: 11px 11px 3px 3px;
+}
+.bowler-figure .p-torso {
+    top: 21px; width: 32px; height: 34px;
+    background: linear-gradient(180deg, #1976d2, #0d47a1);
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.2);
+}
+.bowler-figure .p-arm { width: 7px; height: 26px; background: #1976d2; top: 24px; }
+.bowler-figure .arm-other { left: -2px; transform: rotate(18deg); background: #e8b98a; }
+.bowler-figure .arm-bowl { right: -2px; background: #e8b98a; transform: rotate(-155deg); }
+.bowler-figure .arm-bowl .p-hand {
+    position: absolute; bottom: -3px; left: 50%; transform: translateX(-50%);
+    width: 9px; height: 9px; border-radius: 50%; background: #d32f2f;
+    box-shadow: 0 0 6px rgba(255,82,82,0.8);
+}
+.bowler-figure .p-legs { top: 54px; width: 30px; height: 26px; }
+.bowler-figure .p-leg { width: 8px; height: 26px; background: #263238; }
+.bowler-figure .leg-front { left: 2px; }
+.bowler-figure .leg-back { right: 2px; }
+.bowler-figure .p-shadow { width: 44px; }
+.bowler-end .player-label { top: 86px; }
+
+/* Bowler run-up: legs alternate, body bobs — smooth, no jumps */
+.bowler-figure.running .p-torso { animation: bowlerBob 0.38s ease-in-out infinite; }
+.bowler-figure.running .p-head { animation: bowlerBob 0.38s ease-in-out infinite; }
+.bowler-figure.running .leg-front { animation: legSwing 0.38s ease-in-out infinite alternate; }
+.bowler-figure.running .leg-back { animation: legSwing 0.38s ease-in-out infinite alternate-reverse; }
+.bowler-figure.running .arm-bowl { animation: armPump 0.38s ease-in-out infinite alternate; }
+.bowler-figure.running { animation: runForward 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+/* Delivery: full windmill arm, front leg plants, torso drives through */
+.bowler-figure.delivering .arm-bowl { animation: windmill 0.62s cubic-bezier(0.25, 0.7, 0.3, 1) forwards; }
+.bowler-figure.delivering .leg-front { animation: plantLeg 0.62s cubic-bezier(0.25, 0.7, 0.3, 1) forwards; }
+.bowler-figure.delivering .p-torso { animation: torsoDrive 0.62s cubic-bezier(0.25, 0.7, 0.3, 1) forwards; }
+.bowler-figure.follow-through { transform: rotate(6deg) translateY(3px); transition: transform 0.45s ease; }
+
+/* --- BATTER (near end, large, back to camera) --- */
+.batsman-end {
+    position: absolute; top: auto; bottom: 5%; left: 50%; z-index: 7;
+    transform: translate(-50%, 0) translateX(var(--batter-x, 0px)) translateY(var(--batter-y, 0px));
+    transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+    font-size: 1rem;
+}
+.batter-figure { width: 88px; height: 138px; animation: batterSway 2.8s ease-in-out infinite; }
+.batter-figure .p-head { width: 38px; height: 38px; top: 0; background: #37474f; }
+.batter-figure .helmet .grill {
+    position: absolute; left: 6px; right: 6px; bottom: 2px; height: 12px;
+    background: repeating-linear-gradient(90deg, transparent 0 5px, rgba(255,255,255,0.55) 5px 6px);
+    border-radius: 0 0 18px 18px;
+}
+.batter-figure .p-torso {
+    top: 36px; width: 60px; height: 62px;
+    background: linear-gradient(180deg, #ffffff, #eceff1);
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.12);
+}
+.batter-figure .shirt-number {
+    position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+    font-size: 1.05rem; font-weight: 900; color: #1976d2;
+}
+.batter-figure .p-legs { top: 96px; width: 56px; height: 40px; }
+.batter-figure .p-leg { width: 17px; height: 40px; background: #eceff1; border: 1px solid #b0bec5; }
+.batter-figure .p-leg.pad::after {
+    content: ""; position: absolute; inset: 4px 3px; background: rgba(255,255,255,0.6);
+    border-radius: 4px; border: 1px solid rgba(0,0,0,0.08);
+}
+.batter-figure .leg-front { left: 2px; transform: rotate(4deg); }
+.batter-figure .leg-back { right: 2px; transform: rotate(-4deg); }
+.batter-figure .p-shadow { width: 82px; bottom: -4px; }
+.batsman-end .player-label { top: 142px; }
+
+/* Bat arm — pivots at the shoulder, bat is part of the swing */
+.swing-group {
+    position: absolute; right: -6px; top: 2px; width: 26px; height: 72px;
+    transform-origin: 13px 6px; transition: transform 0.18s ease;
+}
+.batter-figure .arm-bat {
+    left: 8px; top: 0; width: 9px; height: 34px; background: #e8b98a;
+    transform: rotate(-14deg);
+}
+.batter-figure .arm-front {
+    left: -4px; top: 4px; width: 8px; height: 30px; background: #e8b98a;
+    transform: rotate(22deg);
+}
+.bat {
+    position: absolute; left: 2px; top: 30px; width: 12px; height: 62px;
+    background: linear-gradient(180deg, #d7a86a, #a67c3d);
+    border: 1px solid rgba(0,0,0,0.25); border-radius: 3px 3px 6px 6px;
+    transform: rotate(-18deg); transform-origin: top center;
+    animation: batTap 1.7s ease-in-out infinite;
+    box-shadow: 2px 3px 4px rgba(0,0,0,0.3);
+}
+/* Idle bat tap is paused mid-swing so the swing reads cleanly */
+.batter-figure[class*="anim-"] .bat { animation: none; }
+
+/* Shot animations — each is a different swing, all eased, all reset in JS */
+.batter-figure.anim-defend .swing-group { animation: swingDefend 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.batter-figure.anim-ground .swing-group { animation: swingDrive 0.48s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.batter-figure.anim-cutpull .swing-group { animation: swingCut 0.42s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.batter-figure.anim-sweep .swing-group { animation: swingSweep 0.58s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.batter-figure.anim-loft .swing-group { animation: swingLoft 0.62s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.batter-figure.anim-sweep { animation: sweepKneel 0.58s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.batter-figure.anim-loft { animation: loftFollow 0.62s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+.batter-figure.anim-ground { animation: driveLunge 0.48s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+
+/* Wicketkeeper — small, crouched behind the batter, near the camera */
+.keeper { position: absolute; bottom: 2.5%; left: 50%; transform: translateX(-50%) translateY(18px); z-index: 5; opacity: 0.9; }
+.keeper-head { display: block; width: 16px; height: 16px; margin: 0 auto; border-radius: 50%; background: #455a64; }
+.keeper-body { display: block; width: 26px; height: 16px; margin: 1px auto 0; background: #455a64; border-radius: 8px 8px 4px 4px; }
+
+/* Ball + shadow — JS drives position/scale every frame, CSS only smooths the look */
+.ball {
+    position: absolute; width: 15px; height: 15px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #ff5252, #b71c1c);
+    top: 14%; left: 50%; transform: translate(-50%, -50%) scale(0.55);
+    opacity: 0; box-shadow: 0 0 10px rgba(255,82,82,0.9); z-index: 8;
+    will-change: transform, top, left;
+}
+.ball::after {
+    content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 1px;
+    background: rgba(255,255,255,0.75); transform: rotate(-30deg);
+}
+.ball-shadow {
+    position: absolute; width: 16px; height: 6px; border-radius: 50%;
+    background: rgba(0,0,0,0.4); filter: blur(1px);
+    top: 15%; left: 50%; transform: translate(-50%, 0) scale(0.6);
+    opacity: 0; z-index: 4; pointer-events: none;
+}
+
+/* --- Keyframes: all smooth, eased, no snap --- */
+@keyframes bowlerBob { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-3px); } }
+@keyframes legSwing { from { transform: rotate(28deg); } to { transform: rotate(-28deg); } }
+@keyframes armPump { from { transform: rotate(-60deg); } to { transform: rotate(30deg); } }
+@keyframes runForward { from { transform: translateY(-10px); } to { transform: translateY(0); } }
+@keyframes windmill { 0% { transform: rotate(-160deg); } 55% { transform: rotate(40deg); } 100% { transform: rotate(185deg); } }
+@keyframes plantLeg { 0% { transform: rotate(-20deg); } 60% { transform: rotate(12deg) translateY(2px); } 100% { transform: rotate(8deg); } }
+@keyframes torsoDrive { 0% { transform: translateX(-50%) rotate(-8deg); } 60% { transform: translateX(-50%) rotate(6deg); } 100% { transform: translateX(-50%) rotate(3deg); } }
+@keyframes batterSway { 0%, 100% { transform: rotate(0deg) translateY(0); } 50% { transform: rotate(1.2deg) translateY(-1px); } }
+@keyframes batTap { 0%, 100% { transform: rotate(-18deg); } 50% { transform: rotate(-10deg); } }
+@keyframes swingDefend { 0% { transform: rotate(0deg); } 45% { transform: rotate(-32deg) translateY(4px); } 100% { transform: rotate(-8deg); } }
+@keyframes swingDrive { 0% { transform: rotate(12deg); } 40% { transform: rotate(-58deg) translateY(6px); } 100% { transform: rotate(-38deg) translateY(2px); } }
+@keyframes swingCut { 0% { transform: rotate(0deg); } 40% { transform: rotate(-72deg) translateX(6px); } 100% { transform: rotate(-48deg); } }
+@keyframes swingSweep { 0% { transform: rotate(10deg); } 45% { transform: rotate(-68deg) translateY(10px); } 100% { transform: rotate(-45deg) translateY(6px); } }
+@keyframes swingLoft { 0% { transform: rotate(18deg); } 45% { transform: rotate(-78deg) translateY(4px); } 100% { transform: rotate(-62deg) translateY(-2px); } }
+@keyframes sweepKneel { 0% { transform: translateY(0); } 50% { transform: translateY(10px) rotate(2deg); } 100% { transform: translateY(0); } }
+@keyframes loftFollow { 0% { transform: rotate(0deg); } 50% { transform: rotate(-4deg) translateY(-2px); } 100% { transform: rotate(0deg); } }
+@keyframes driveLunge { 0% { transform: translateY(0); } 50% { transform: translateY(-4px); } 100% { transform: translateY(0); } }
+
+@media (max-width: 650px) {
+    .pitch { height: 410px; }
+    .batter-figure { transform: scale(0.88); }
+    .camera-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .camera-stage, .bowler-end, .batsman-end, .batter-figure, .bat { animation-duration: 0.01s !important; transition-duration: 0.2s !important; }
+}
+
+/* ============================================================
+   FIELD PLACEMENTS + RUNNING BETWEEN WICKETS
+   ============================================================ */
+
+/* Field setup (bowling panel) */
+.field-setup { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 14px; }
+.field-setup h4 { color: #81c784; font-size: 0.92rem; margin-bottom: 8px; }
+.field-hint { font-size: 0.8rem; color: #90a4ae; margin-top: 8px; line-height: 1.45; }
+#fieldStatus { color: var(--accent); font-weight: 700; }
+
+/* Fielders — small players on the outfield, scale with perspective (far = small) */
+.fielders { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.fielder {
+    position: absolute; transform: translate(-50%, -50%);
+    width: 30px; height: 40px; cursor: pointer; pointer-events: auto;
+    transition: left 0.55s cubic-bezier(0.22, 1, 0.36, 1), top 0.55s cubic-bezier(0.22, 1, 0.36, 1), transform 0.3s ease;
+    will-change: left, top;
+}
+.fielder:hover { transform: translate(-50%, -50%) scale(1.18); z-index: 9; }
+.fielder .fielder-body {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    width: 18px; height: 20px; border-radius: 6px 6px 4px 4px;
+    background: linear-gradient(180deg, #c62828, #7f0000);
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.25);
+}
+.fielder .fielder-head {
+    position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+    width: 14px; height: 14px; border-radius: 50%; background: #e8b98a;
+    box-shadow: inset -2px -2px 0 rgba(0,0,0,0.18);
+}
+.fielder .fielder-label {
+    position: absolute; left: 50%; top: 34px; transform: translateX(-50%);
+    font-size: 0.55rem; font-weight: 800; letter-spacing: 0.5px; color: #fff;
+    background: rgba(0,0,0,0.55); padding: 1px 5px; border-radius: 8px; white-space: nowrap;
+}
+.fielder.far { transform: translate(-50%, -50%) scale(0.72); }
+.fielder.near { transform: translate(-50%, -50%) scale(1.12); }
+.fielder.chasing { z-index: 10; }
+.fielder.chasing .fielder-body { animation: fielderSprint 0.32s ease-in-out infinite alternate; }
+.fielder.catching { animation: fielderJump 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) forwards; }
+@keyframes fielderSprint { from { transform: translateX(-50%) rotate(-4deg); } to { transform: translateX(-50%) rotate(4deg); } }
+@keyframes fielderJump { 0% { transform: translate(-50%, -50%) scale(1); } 45% { transform: translate(-50%, -58%) scale(1.15); } 100% { transform: translate(-50%, -50%) scale(1.1); } }
+
+/* Non-striker — small, at the bowler's end */
+.non-striker {
+    position: absolute; top: 15%; left: 58%; z-index: 6;
+    transform: translate(-50%, 0);
+    transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.non-striker-figure { width: 34px; height: 58px; }
+.non-striker-figure .p-head { width: 16px; height: 16px; background: #37474f; }
+.non-striker-figure .p-torso { top: 15px; width: 24px; height: 24px; background: linear-gradient(180deg, #fff, #eceff1); }
+.non-striker-figure .shirt-number { position: absolute; left: 50%; top: 4px; transform: translateX(-50%); font-size: 0.7rem; font-weight: 900; color: #1976d2; }
+.non-striker-figure .p-legs { top: 38px; width: 22px; height: 18px; }
+.non-striker-figure .p-leg { width: 7px; height: 18px; background: #eceff1; }
+.non-striker-figure .p-shadow { width: 30px; }
+.non-striker .player-label { top: 62px; font-size: 0.55rem; }
+/* Running: bob the inner figures (outer containers are moved by JS, so don't animate them) */
+.batsman-end.sprinting .batter-figure, .non-striker.sprinting .non-striker-figure { animation: runBobFigure 0.28s ease-in-out infinite alternate; }
+@keyframes runBobFigure { from { transform: translateY(0); } to { transform: translateY(-4px); } }
+
+/* Running panel */
+.running-panel {
+    background: rgba(255, 215, 0, 0.12); border: 1px solid rgba(255, 215, 0, 0.45);
+    border-radius: 12px; padding: 12px; margin-top: 10px; text-align: center;
+    animation: fadeIn 0.25s ease;
+}
+.running-text { font-weight: 800; font-size: 1rem; margin-bottom: 10px; }
+.running-buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.run-btn {
+    padding: 10px 16px; border: none; border-radius: 10px; cursor: pointer;
+    background: linear-gradient(135deg, #2e7d32, #43a047); color: #fff;
+    font-weight: 800; font-size: 0.92rem; transition: transform 0.15s, filter 0.15s;
+}
+.run-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
+.run-btn.stay { background: rgba(255,255,255,0.14); border: 1px solid var(--border); }
+.running-hint { font-size: 0.8rem; color: #ffe57f; margin-top: 8px; }
+
+/* Ball travelling to the boundary / fielder — JS sets left/top, CSS smooths it */
+.ball.travelling { transition: left 0.55s cubic-bezier(0.22, 1, 0.36, 1), top 0.55s cubic-bezier(0.22, 1, 0.36, 1), transform 0.55s ease; }
+
+/* ============================================================
+   EXTRAS + PLAYERS + SCORECARD + REPLAY + TOSS
+   ============================================================ */
+.players-strip {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 14px; margin-bottom: 10px; font-size: 0.82rem; font-weight: 600; color: #cfd8dc;
+}
+.players-strip span b { color: var(--accent); }
+.toss-panel {
+    background: var(--card-bg); border: 1px solid var(--accent); border-radius: 14px;
+    padding: 16px; margin-bottom: 12px; text-align: center;
+}
+.toss-panel h3 { color: var(--accent); margin-bottom: 6px; }
+.toss-panel p { color: #b0bec5; margin-bottom: 10px; }
+.match-centre {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px; margin-top: 12px;
+}
+.match-centre h4 { color: #90a4ae; margin-bottom: 10px; font-size: 0.88rem; }
+.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.chart-box { background: rgba(0,0,0,0.35); border-radius: 10px; padding: 10px; text-align: center; }
+.chart-box label { display: block; font-size: 0.78rem; color: #b0bec5; margin-bottom: 6px; font-weight: 600; }
+.chart-box canvas { max-width: 100%; height: auto; background: #0e2a12; border-radius: 8px; }
+.scorecard-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.scorecard-card {
+    background: #12242e; border: 1px solid var(--border); border-radius: 14px;
+    max-width: 640px; width: 100%; max-height: 85vh; overflow-y: auto; padding: 18px;
+}
+.scorecard-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.scorecard-head h3 { color: var(--accent); }
+.scorecard-body table { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-bottom: 14px; }
+.scorecard-body th, .scorecard-body td { padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.scorecard-body th { color: #81c784; font-size: 0.75rem; text-transform: uppercase; }
+.scorecard-body h4 { color: #fff; margin: 10px 0 6px; }
+.scorecard-body .not-out { color: #81c784; font-weight: 700; }
+@media (max-width: 650px) { .charts-grid { grid-template-columns: 1fr; } }
