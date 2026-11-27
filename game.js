@@ -1212,7 +1212,7 @@
                 }
                 throwBallBackToBowler(onDone);
             }, holdMs);
-        };
+        });
     }
 
     function startRunningPhase(delivery, shot, outcome, startPt) {
