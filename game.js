@@ -4,7 +4,7 @@
     const PLAYERS_PER_TEAM = 11;
 
     // ==========================================
-    // 1. WEB AUDIO SOUND ENGINE
+    // 1. PROCEDURAL WEB AUDIO ENGINE
     // ==========================================
     const SoundFX = (() => {
         let ctx = null;
@@ -19,7 +19,7 @@
             return ctx;
         }
 
-        function playTone(freq, endFreq, duration, type = 'sine', gainVal = 0.2) {
+        function playTone(freq, endFreq, duration, type = 'sine', gainVal = 0.18) {
             if (muted) return;
             const c = ensureCtx();
             if (!c) return;
@@ -28,36 +28,30 @@
             osc.type = type;
             osc.frequency.setValueAtTime(freq, c.currentTime);
             if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, c.currentTime + duration);
-
             gain.gain.setValueAtTime(gainVal, c.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + duration);
-
             osc.connect(gain);
             gain.connect(c.destination);
             osc.start();
             osc.stop(c.currentTime + duration);
         }
 
-        function playNoise(duration, filterFreq, filterType = 'bandpass', gainVal = 0.25) {
+        function playNoise(duration, filterFreq, filterType = 'bandpass', gainVal = 0.22) {
             if (muted) return;
             const c = ensureCtx();
             if (!c) return;
-            const bufferSize = c.sampleRate * duration;
+            const bufferSize = Math.floor(c.sampleRate * duration);
             const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
             const data = buffer.getChannelData(0);
             for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-
             const noise = c.createBufferSource();
             noise.buffer = buffer;
-
             const filter = c.createBiquadFilter();
             filter.type = filterType;
             filter.frequency.setValueAtTime(filterFreq, c.currentTime);
-
             const gain = c.createGain();
             gain.gain.setValueAtTime(gainVal, c.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + duration);
-
             noise.connect(filter);
             filter.connect(gain);
             gain.connect(c.destination);
@@ -66,33 +60,31 @@
 
         return {
             toggleMute() { muted = !muted; return muted; },
-            click() { playTone(600, 400, 0.05, 'triangle', 0.08); },
-            step() { playTone(220, 180, 0.04, 'sine', 0.06); },
-            bowlWhoosh() { playNoise(0.25, 900, 'bandpass', 0.12); },
-            pitchBounce() { playTone(160, 75, 0.09, 'sine', 0.22); },
+            click() { playTone(620, 420, 0.04, 'triangle', 0.07); },
+            step() { playTone(210, 170, 0.035, 'sine', 0.05); },
+            bowlWhoosh() { playNoise(0.22, 950, 'bandpass', 0.12); },
+            pitchBounce() { playTone(165, 72, 0.08, 'sine', 0.22); },
             batDefend() {
-                playTone(260, 120, 0.08, 'triangle', 0.2);
-                playNoise(0.05, 1200, 'highpass', 0.1);
+                playTone(250, 115, 0.08, 'triangle', 0.18);
+                playNoise(0.05, 1100, 'highpass', 0.09);
             },
             batCrack(power = 1) {
-                playTone(420 * power, 130, 0.12, 'triangle', 0.35);
-                playNoise(0.09, 2400, 'bandpass', 0.3);
+                playTone(440 * power, 125, 0.12, 'triangle', 0.34);
+                playNoise(0.08, 2500, 'bandpass', 0.28);
             },
             stumpsShatter() {
-                playNoise(0.35, 1800, 'highpass', 0.35);
-                playTone(320, 90, 0.22, 'sawtooth', 0.25);
-                setTimeout(() => playTone(240, 70, 0.2, 'square', 0.2), 80);
+                playNoise(0.32, 1900, 'highpass', 0.35);
+                playTone(340, 85, 0.22, 'sawtooth', 0.24);
             },
             crowdRoar(big = false) {
-                const dur = big ? 1.8 : 1.1;
-                playNoise(dur, 650, 'lowpass', big ? 0.32 : 0.18);
-                if (big) playTone(523.25, 659.25, 0.3, 'triangle', 0.12);
+                playNoise(big ? 1.6 : 0.9, 620, 'lowpass', big ? 0.28 : 0.15);
+                if (big) playTone(523.25, 659.25, 0.28, 'triangle', 0.1);
             }
         };
     })();
 
     // ==========================================
-    // 2. GAME STATE
+    // 2. STATE & SQUADS
     // ==========================================
     const state = {
         maxOvers: 5,
@@ -114,6 +106,11 @@
         cameraMode: 'batter',
         fieldPreset: 'balanced',
         field: [],
+        // Direct Pitch Aim Coordinates (x: 25..75%, y: 32..76%)
+        aimX: 46,
+        aimY: 56,
+        // 360° Shot Angle in degrees (-140° fine off to +140° fine leg, 0° = straight)
+        shotAngle: 0,
         pendingRun: null,
         runTimer: null,
         deliveryId: 0,
@@ -121,706 +118,516 @@
         replayFrames: [],
         replaying: false,
         freeHit: false,
-        powerplay: false,
+        powerplay: true,
         extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0 },
-        tossDone: false,
+        autoBallTimer: null,
+        autoBowlTimer: null,
+        runRequested: false,
+        runCrossMs: 1100,
         strikerIdx: 0,
         nonStrikerIdx: 1,
         nextBatterIdx: 2,
         currentBowlerIdx: 0,
         lastBowlerIdx: -1,
         overRuns: [],
+        currentOverRuns: 0,
         wagonShots: [],
-        aiMemory: { shotTypes: {}, dirs: {}, guards: {}, footwork: {}, bowlLines: {}, bowlLengths: {}, bowlVars: {}, boundaries: 0, ballsFaced: 0 },
+        aiMemory: { shotTypes: {}, angles: {}, guards: {}, footwork: {}, bowlLines: {}, bowlLengths: {}, ballsFaced: 0 },
         inningsData: null,
+        scorecardHistory: [],
         conditions: null
     };
 
     const $ = (id) => document.getElementById(id);
 
-    // ==========================================
-    // BROADCAST EDITION — RANDOM CLIMATE, STADIUM & TV GRAPHICS
-    // ==========================================
     const VENUES = [
-        { name: 'R. Premadasa Stadium, Colombo', city: 'Colombo' },
-        { name: "Lord's, London", city: 'London' },
-        { name: 'Melbourne Cricket Ground', city: 'Melbourne' },
-        { name: 'Eden Gardens, Kolkata', city: 'Kolkata' },
-        { name: 'Newlands, Cape Town', city: 'Cape Town' },
-        { name: 'Galle International Stadium', city: 'Galle' }
+        { name: 'R. Premadasa Stadium, Colombo' },
+        { name: "Lord's, London" },
+        { name: 'Melbourne Cricket Ground' },
+        { name: 'Eden Gardens, Kolkata' },
+        { name: 'Newlands, Cape Town' }
     ];
-    const CROWD_COLOURS = ['#e53935','#1976d2','#fdd835','#43a047','#ff7043','#ab47bc','#00acc1','#f5f5f5','#ffca28','#8d6e63'];
-    function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
     function generateConditions() {
         const venue = pick(VENUES);
-        const weather = pick(['Sunny','Sunny','Partly Cloudy','Overcast','Overcast','Humid','Humid','Light Drizzle']);
-        const tempC = weather==='Sunny' ? 28+Math.floor(Math.random()*7) : weather==='Overcast' ? 19+Math.floor(Math.random()*6) : 22+Math.floor(Math.random()*8);
-        const humidity = weather==='Humid' ? 78+Math.floor(Math.random()*17) : weather==='Overcast' ? 65+Math.floor(Math.random()*20) : weather==='Light Drizzle' ? 88+Math.floor(Math.random()*10) : 42+Math.floor(Math.random()*28);
-        const windKmh = 3+Math.floor(Math.random()*29);
-        const windDirs = [
-            { label:'Off → Leg', arrow:'→', lateral: 1, along: 0 },
-            { label:'Leg → Off', arrow:'←', lateral:-1, along: 0 },
-            { label:'Headwind', arrow:'↓', lateral: 0, along:-1 },
-            { label:'Tailwind', arrow:'↑', lateral: 0, along: 1 },
-            { label:'Off → Leg ↘', arrow:'↘', lateral: 1, along:-1 },
-            { label:'Leg → Off ↗', arrow:'↗', lateral:-1, along: 1 }
-        ];
-        const wind = pick(windDirs);
-        // Dew: high humidity + evening + humid/drizzle weather. It gets worse in the 2nd innings.
-        let dew = Math.round(Math.min(95, Math.max(5, (humidity-55)*1.4 + (weather==='Humid'?18:0) + (weather==='Light Drizzle'?22:0) + Math.random()*18)));
-        const pitch = pick(['Flat — batter friendly','Green — seam movement','Dry — turns late','Slow — low bounce']);
-        const c = { venue: venue.name, weather, tempC, humidity, windKmh, windDir: wind.label, windArrow: wind.arrow, windLateral: wind.lateral, windAlong: wind.along, dew, pitch,
-            swingBoost: weather==='Overcast' ? 0.09 : weather==='Humid' ? 0.06 : weather==='Light Drizzle' ? 0.05 : 0.01,
-            spinBoost: pitch.includes('Dry') ? 0.07 : pitch.includes('Green') ? -0.03 : 0 };
-        state.conditions = c;
-        return c;
+        const weather = pick(['Sunny', 'Sunny', 'Partly Cloudy', 'Overcast', 'Humid', 'Light Drizzle']);
+        const tempC = weather === 'Sunny' ? 30 : weather === 'Overcast' ? 20 : 25;
+        const humidity = weather === 'Humid' ? 84 : weather === 'Light Drizzle' ? 92 : 55;
+        const windKmh = 6 + Math.floor(Math.random() * 22);
+        const windLateral = pick([-1, 0, 1]);
+        const windAlong = pick([-1, 0, 1]);
+        const dew = Math.round(Math.min(90, Math.max(10, (humidity - 50) * 1.5)));
+        const pitch = pick(['Flat Track', 'Green Seamer', 'Dry Turner', 'Two-Paced']);
+
+        state.conditions = {
+            venue: venue.name,
+            weather,
+            tempC,
+            humidity,
+            windKmh,
+            windLateral,
+            windAlong,
+            dew,
+            pitch,
+            swingBoost: (weather === 'Overcast' || weather === 'Humid') ? 0.08 : 0.02,
+            spinBoost: pitch.includes('Dry') ? 0.07 : 0
+        };
+        renderConditions();
     }
-    function dewLabel(d){ return d>=70?'Heavy 💧💧':d>=40?'Moderate 💧':d>=20?'Light 💧':'Dry'; }
-    function windDesc(c){ return `${c.windKmh} km/h ${c.windDir} ${c.windArrow}`; }
-    function conditionsSummary(c){
-        const parts = [];
-        if (c.swingBoost>=0.06) parts.push('Swing is on — overcast/humid air will move the ball late.');
-        if (c.windKmh>=20) parts.push(`Strong ${c.windDir.toLowerCase()} wind (${c.windKmh} km/h) will push the ball${c.windLateral!==0?' sideways':''}${c.windAlong===1?' and carry sixes further':c.windAlong===-1?' and hold sixes up':''}.`);
-        else if (c.windKmh>=10) parts.push(`A ${c.windKmh} km/h ${c.windDir.toLowerCase()} breeze will drift the ball a little.`);
-        if (c.dew>=60) parts.push('Heavy dew expected later — the ball will get wet, spinners will struggle for grip and fielders may fumble.');
-        else if (c.dew>=35) parts.push('Some dew later — watch the ball get slippery in the 2nd innings.');
-        if (c.pitch.includes('Green')) parts.push('Green pitch: seamers get extra movement early.');
-        if (c.pitch.includes('Dry')) parts.push('Dry pitch: spin will bite as the game goes on.');
-        if (c.pitch.includes('Flat')) parts.push('Flat pitch: runs are on offer, bowlers must be clever.');
-        return parts.join(' ') || 'Perfect batting weather — no excuses.';
-    }
-    function buildCrowd(){
-        ['crowdTop','crowdBottom'].forEach(id=>{
-            const el = $(id); if(!el) return;
-            el.innerHTML='';
-            const n = id==='crowdTop'?170:130;
-            for(let i=0;i<n;i++){ const d=document.createElement('i'); d.style.background=CROWD_COLOURS[Math.floor(Math.random()*CROWD_COLOURS.length)]; el.appendChild(d); }
-        });
-    }
-    function applyStadiumLook(){
-        const c = state.conditions; if(!c) return;
-        const shell = $('stadiumShell'); if(!shell) return;
-        shell.classList.toggle('overcast', c.weather==='Overcast');
-        shell.classList.toggle('night', c.weather==='Overcast' && c.tempC<22);
-        shell.classList.toggle('drizzle', c.weather==='Light Drizzle');
-        shell.classList.toggle('windy', c.windKmh>=14);
-        shell.style.setProperty('--wind-dur', Math.max(0.35, 1.6 - c.windKmh*0.04)+'s');
-        const pitch = $('pitch'); if(pitch) pitch.classList.toggle('dewy', c.dew>=45);
-        const wa = $('tvWindArrow'); if(wa) wa.textContent = `💨 ${c.windArrow} ${c.windKmh} km/h ${c.windDir}`;
-    }
-    function renderConditions(){
-        const c = state.conditions; if(!c) return;
-        const grid = $('condGrid');
-        if(grid) grid.innerHTML = `
-            <div class="cond-cell"><b>Weather</b><span>${c.weather==='Sunny'?'☀️':c.weather==='Overcast'?'☁️':c.weather==='Light Drizzle'?'🌧️':'🌤️'} ${c.weather} • ${c.tempC}°C</span></div>
-            <div class="cond-cell"><b>Wind</b><span>💨 ${windDesc(c)}</span></div>
-            <div class="cond-cell"><b>Dew</b><span>${dewLabel(c.dew)} — ${c.dew}%</span></div>
-            <div class="cond-cell"><b>Humidity</b><span>💦 ${c.humidity}%</span></div>
-            <div class="cond-cell"><b>Pitch</b><span>${c.pitch}</span></div>
-            <div class="cond-cell"><b>Swing</b><span>${c.swingBoost>=0.06?'High ↗':'Low →'}</span></div>`;
-        const venueEl = $('condVenue'); if(venueEl) venueEl.textContent = `🏟️ ${c.venue}`;
-        const note = $('condNote'); if(note) note.textContent = '📋 ' + conditionsSummary(c);
-        const bar = $('tvConditionsBar');
-        if(bar) bar.innerHTML = `🏟️ <b>${c.venue}</b> &nbsp;•&nbsp; ${c.weather} ${c.tempC}°C &nbsp;•&nbsp; 💨 Wind ${windDesc(c)} &nbsp;•&nbsp; 💧 Dew ${dewLabel(c.dew)} (${c.dew}%) &nbsp;•&nbsp; 🌱 ${c.pitch}`;
-        const wb = $('tvWeatherBug');
-        if(wb) wb.textContent = `💨 ${c.windKmh} km/h ${c.windDir} ${c.windArrow} • 💧 Dew ${c.dew}% • 🌡️ ${c.tempC}°C • 💦 ${c.humidity}%`;
-        const th = $('tossConditionsHint');
-        if(th) th.textContent = `Conditions: ${c.weather}, ${c.tempC}°C, wind ${windDesc(c)}, dew ${dewLabel(c.dew)}. ${conditionsSummary(c)}`;
-        applyStadiumLook();
-    }
-    function updateTVScorebug(){
+
+    function renderConditions() {
         const c = state.conditions;
-        const team = state[state.battingSide];
-        const name = state.battingSide==='p1' ? ($('p1Label')?$('p1Label').textContent:'YOU') : ($('p2Label')?$('p2Label').textContent:'AI');
-        const tn = $('tvTeamName'); if(tn) tn.textContent = name;
-        const ts = $('tvScore'); if(ts) ts.textContent = `${team.score}/${team.wickets}`;
-        const to = $('tvOvers'); if(to) to.textContent = `(${Math.floor(team.balls/6)}.${team.balls%6} ov)`;
-        const crr = team.balls? (team.score/(team.balls/6)).toFixed(1):'—';
-        let rrrTxt = 'RRR —';
-        if(state.target!==null){ const need=Math.max(0,state.target-team.score); const left=Math.max(0,state.maxOvers*6-team.balls); rrrTxt = left? `Need ${need} off ${left} • RRR ${(need/(left/6)).toFixed(1)}` : `Need ${need}`; }
-        const cr = $('tvCrr'); if(cr) cr.textContent = `CRR ${crr} • ${rrrTxt}`;
-        const st=currentStriker(), ns=currentNonStriker(), bw=currentBowler();
-        const tb=$('tvBatters');
-        if(tb) tb.innerHTML = `${st?`<b>${st.name}</b> ${st.batRuns}(${st.batBalls})`:''} ${ns?`• ${ns.name} ${ns.batRuns}(${ns.batBalls})`:''} ${bw?`• 🎳 ${bw.name} ${bw.bowlWkts}/${bw.bowlRuns}`:''}`;
-        const bs=$('bigScreenText');
-        if(bs) bs.innerHTML = `${name}<br>${team.score}/${team.wickets} (${Math.floor(team.balls/6)}.${team.balls%6})`;
-        const bss=$('bigScreenSub');
-        if(bss) bss.textContent = state.target? `TARGET ${state.target}` : (c? `${c.weather.toUpperCase()} • ${c.tempC}°C` : 'LIVE');
-    }
-    function showLowerThird(name, detail){
-        const lt=$('tvLowerThird'); if(!lt) return;
-        $('ltName').textContent=name; $('ltDetail').textContent=detail;
-        lt.classList.add('show');
-        clearTimeout(showLowerThird._t);
-        showLowerThird._t=setTimeout(()=>lt.classList.remove('show'), 4200);
-    }
-    function showBroadcastEvent(kind, text, sub){
-        const ov=$('tvEventOverlay'); if(!ov) return;
-        ov.classList.remove('show','wicket','six');
-        if(kind==='wicket') ov.classList.add('wicket'); if(kind==='six') ov.classList.add('six');
-        $('tvEventText').textContent=text; $('tvEventSub').textContent=sub||'';
-        void ov.offsetWidth; ov.classList.add('show');
-        const bs=$('bigScreenText'); if(bs) bs.innerHTML=text;
-    }
-    function crowdCheer(big){
-        const shell=$('stadiumShell'), bot=$('standsBottom');
-        [shell,bot].forEach(el=>{ if(!el) return; el.classList.add('cheering'); setTimeout(()=>el.classList.remove('cheering'), big?2600:1400); });
-        const mood=$('crowdMood');
-        if(mood) mood.textContent = big?'Crowd on its feet! 🔊':'Crowd roaring!';
-        setTimeout(()=>{ if(mood) mood.textContent='Crowd is buzzing'; }, big?2600:1400);
-    }
-    function umpireSignal(kind){
-        const u=$('umpire'); if(!u) return;
-        u.classList.remove('signal-four','signal-six','signal-out','signal-wide');
-        if(!kind) return;
-        u.classList.add('signal-'+kind);
-        setTimeout(()=>u.classList.remove('signal-'+kind), 1900);
-    }
-    function setTicker(text){ const t=$('tickerText'); if(t) t.textContent=text; }
-    function shakeCamera(){ const p=$('pitch'); if(!p) return; p.classList.remove('shake'); void p.offsetWidth; p.classList.add('shake'); }
+        if (!c) return;
+        if ($('condVenue')) $('condVenue').textContent = `🏟️ ${c.venue}`;
+        if ($('condWeather')) $('condWeather').textContent = `${c.weather === 'Sunny' ? '☀️' : c.weather === 'Light Drizzle' ? '🌧️' : '⛅'} ${c.weather} ${c.tempC}°C`;
+        if ($('condPitch')) $('condPitch').textContent = `🌱 ${c.pitch}`;
 
-
-    // ==========================================
-    // 3. VISUAL CREASE POSITIONING (Batter & Bowler)
-    // ==========================================
-    function updateVisualPositions() {
-        // Batter — behind-top view. Guard = smooth lateral shuffle, depth = up/down the pitch.
-        // Off = left (-28px), Leg = right (+28px). CSS transition on transform makes it glide.
-        const guard = getActiveVal('batterGuardGroup'); // 'off' | 'middle' | 'leg'
-        const depth = getActiveVal('footworkGroup');    // 'advance' | 'crease' | 'back'
-        const batEl = $('batsman');
-        const batX = guard === 'off' ? -28 : guard === 'leg' ? 28 : 0;
-        const batY = depth === 'advance' ? -18 : depth === 'back' ? 14 : 0;
-        batEl.style.setProperty('--batter-x', `${batX}px`);
-        batEl.style.setProperty('--batter-y', `${batY}px`);
-
-        // Bowler — far end, behind his wicket. Wide = far left, Round = far right.
-        const angle = getActiveVal('bowlAngleGroup'); // 'over' | 'wide' | 'round'
-        const bowlEl = $('bowlerEnd');
-        const bowlX = angle === 'wide' ? -26 : angle === 'round' ? 26 : -8;
-        bowlEl.style.setProperty('--bowler-x', `${bowlX}px`);
+        const sky = $('stadiumSky');
+        if (sky) {
+            sky.classList.toggle('overcast', c.weather === 'Overcast');
+            sky.classList.toggle('night', c.weather === 'Overcast' && c.tempC <= 20);
+            sky.classList.toggle('drizzle', c.weather === 'Light Drizzle');
+        }
+        const strip = $('pitchStrip');
+        if (strip) strip.classList.toggle('dewy', c.dew >= 50);
     }
 
-    // ==========================================
-    // 2b. REAL PLAYERS — 11 per side, with timing / power / bowling skill
-    // ==========================================
     function makePlayer(name, timing, power, bowlType, bowlSkill) {
-        return { name, timing, power, bowlType, bowlSkill,
+        return {
+            name, timing, power, bowlType, bowlSkill,
             batRuns: 0, batBalls: 0, fours: 0, sixes: 0, outHow: null, out: false,
-            bowlBalls: 0, bowlRuns: 0, bowlWkts: 0, oversBowled: 0, fatigue: 0 };
+            bowlBalls: 0, bowlRuns: 0, bowlWkts: 0, oversBowled: 0, fatigue: 0
+        };
     }
+
     const SQUADS = {
         p1: [
             makePlayer('A. Perera', 88, 82, 'pace', 62), makePlayer('K. Mendis', 85, 78, 'spin', 68),
-            makePlayer('D. Silva', 80, 85, 'pace', 58), makePlayer('S. Fernando', 78, 80, 'medium', 60),
-            makePlayer('R. Jayawardene', 75, 72, 'spin', 74), makePlayer('T. Kumara', 68, 88, 'pace', 82),
-            makePlayer('M. Herath', 65, 70, 'spin', 78), makePlayer('L. Sandakan', 55, 60, 'spin', 80),
-            makePlayer('C. Rajapaksa', 50, 65, 'medium', 66), makePlayer('P. Wickramasinghe', 45, 55, 'pace', 70),
-            makePlayer('H. Bandara', 40, 50, 'medium', 55)
+            makePlayer('D. de Silva', 82, 84, 'spin', 72), makePlayer('C. Asalanka', 84, 86, 'medium', 58),
+            makePlayer('P. Nissanka', 80, 76, 'medium', 55), makePlayer('W. Hasaranga', 76, 88, 'spin', 85),
+            makePlayer('D. Shanaka', 74, 90, 'medium', 74), makePlayer('M. Theekshana', 64, 65, 'spin', 83),
+            makePlayer('D. Chameera', 55, 62, 'pace', 82), makePlayer('M. Pathirana', 48, 55, 'pace', 84),
+            makePlayer('A. Fernando', 44, 50, 'pace', 76)
         ],
         p2: [
-            makePlayer('N. Perera', 86, 80, 'pace', 64), makePlayer('B. Rajapaksa', 84, 83, 'spin', 62),
-            makePlayer('C. Asalanka', 82, 86, 'medium', 58), makePlayer('D. de Silva', 79, 81, 'pace', 66),
-            makePlayer('W. Hasaranga', 76, 84, 'spin', 84), makePlayer('M. Theekshana', 70, 72, 'spin', 82),
-            makePlayer('D. Chameera', 64, 78, 'pace', 80), makePlayer('L. Kumara', 58, 66, 'pace', 78),
-            makePlayer('P. Nissanka', 52, 60, 'medium', 60), makePlayer('K. Karunaratne', 46, 54, 'pace', 68),
-            makePlayer('S. Lakmal', 42, 48, 'medium', 62)
+            makePlayer('R. Sharma', 89, 88, 'spin', 60), makePlayer('V. Kohli', 92, 84, 'medium', 58),
+            makePlayer('S. Yadav', 86, 90, 'medium', 55), makePlayer('R. Pant', 82, 87, 'pace', 50),
+            makePlayer('H. Pandya', 80, 89, 'pace', 79), makePlayer('R. Jadeja', 78, 80, 'spin', 82),
+            makePlayer('A. Patel', 72, 76, 'spin', 78), makePlayer('K. Yadav', 60, 62, 'spin', 84),
+            makePlayer('J. Bumrah', 54, 60, 'pace', 91), makePlayer('M. Siraj', 48, 55, 'pace', 81),
+            makePlayer('A. Singh', 45, 52, 'pace', 80)
         ]
     };
+
     function freshSquads() {
         const copy = {};
-        Object.keys(SQUADS).forEach(k => { copy[k] = SQUADS[k].map(pl => makePlayer(pl.name, pl.timing, pl.power, pl.bowlType, pl.bowlSkill)); });
+        Object.keys(SQUADS).forEach(k => {
+            copy[k] = SQUADS[k].map(pl => makePlayer(pl.name, pl.timing, pl.power, pl.bowlType, pl.bowlSkill));
+        });
         return copy;
     }
+
     function maxBowlerOvers() { return Math.max(1, Math.floor(state.maxOvers / 5)); }
-    function currentStriker() {
-        const squad = state.inningsData ? state.inningsData.batting : [];
-        return squad[state.strikerIdx] || null;
-    }
-    function currentNonStriker() {
-        const squad = state.inningsData ? state.inningsData.batting : [];
-        return squad[state.nonStrikerIdx] || null;
-    }
-    function currentBowler() {
-        const squad = state.inningsData ? state.inningsData.bowling : [];
-        return squad[state.currentBowlerIdx] || null;
-    }
+    function currentStriker() { return state.inningsData ? state.inningsData.batting[state.strikerIdx] : null; }
+    function currentNonStriker() { return state.inningsData ? state.inningsData.batting[state.nonStrikerIdx] : null; }
+    function currentBowler() { return state.inningsData ? state.inningsData.bowling[state.currentBowlerIdx] : null; }
+
     function bowlerAvailable(idx) {
         const squad = state.inningsData ? state.inningsData.bowling : [];
         const b = squad[idx];
-        if (!b) return false;
-        if (idx === state.lastBowlerIdx) return false; // cannot bowl 2 overs in a row
-        if (b.oversBowled >= maxBowlerOvers()) return false;
+        if (!b || idx === state.lastBowlerIdx || b.oversBowled >= maxBowlerOvers()) return false;
         return true;
     }
-    function updatePlayersStrip() {
-        const st = currentStriker(), ns = currentNonStriker(), bw = currentBowler();
-        const si = $('strikerInfo'), ni = $('nonStrikerInfo'), bi = $('bowlerInfo'), ei = $('extrasInfo');
-        if (si) si.innerHTML = st ? `Striker: <b>${st.name}</b> ${st.batRuns} (${st.batBalls}) • timing ${st.timing}` : 'Striker: —';
-        if (ni) ni.innerHTML = ns ? `Non-striker: <b>${ns.name}</b> ${ns.batRuns} (${ns.batBalls})` : 'Non-striker: —';
-        if (bi) {
-            const fat = bw ? Math.round(bw.fatigue * 100) : 0;
-            bi.innerHTML = bw ? `Bowler: <b>${bw.name}</b> ${bw.bowlWkts}/${bw.bowlRuns} • ${bw.bowlType} • fatigue ${fat}%` : 'Bowler: —';
-        }
-        if (ei) ei.textContent = `Extras: ${state.extras.wides + state.extras.noBalls + state.extras.byes + state.extras.legByes} (wd ${state.extras.wides}, nb ${state.extras.noBalls}, b ${state.extras.byes}, lb ${state.extras.legByes})`;
-        const fh = $('freeHitBadge');
-        if (fh) fh.style.display = state.freeHit ? 'inline-block' : 'none';
-        const pp = $('powerplayBadge');
-        if (pp) pp.style.display = state.powerplay ? 'inline-block' : 'none';
-        const ml = $('maxBowlerOversLabel');
-        if (ml) ml.textContent = String(maxBowlerOvers());
-    }
-    function renderBowlerSelect() {
-        const group = $('bowlerSelectGroup');
-        if (!group || !state.inningsData) return;
-        group.innerHTML = '';
-        state.inningsData.bowling.forEach((b, i) => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'opt-btn' + (i === state.currentBowlerIdx ? ' active' : '');
-            btn.textContent = `${b.name} • ${b.bowlType} ${b.bowlSkill} • ${b.oversBowled}/${maxBowlerOvers()} ov`;
-            btn.disabled = !bowlerAvailable(i) && i !== state.currentBowlerIdx;
-            if (btn.disabled) btn.style.opacity = '0.4';
-            btn.addEventListener('click', () => {
-                if (!bowlerAvailable(i)) return;
-                state.currentBowlerIdx = i;
-                SoundFX.click();
-                renderBowlerSelect();
-                updatePlayersStrip();
-                const fi = $('bowlerFatigueInfo');
-                if (fi) fi.textContent = `${b.name} selected — fatigue ${Math.round(b.fatigue * 100)}%. Fresh bowlers are faster and more accurate.`;
-            });
-            group.appendChild(btn);
-        });
-    }
-    function startInningsData(battingSide) {
-        const battingKey = battingSide;
-        const bowlingKey = battingSide === 'p1' ? 'p2' : 'p1';
-        state.inningsData = {
-            batting: state._squads[battingKey],
-            bowling: state._squads[bowlingKey],
-            battingSide
-        };
-        state.strikerIdx = 0; state.nonStrikerIdx = 1; state.nextBatterIdx = 2;
-        state.currentBowlerIdx = 0; state.lastBowlerIdx = -1;
-        state.overRuns = []; state.wagonShots = []; state.currentOverRuns = 0;
-        state.extras = { wides: 0, noBalls: 0, byes: 0, legByes: 0 };
-        state.freeHit = false;
-        updatePowerplay();
-        renderBowlerSelect();
-        updatePlayersStrip();
-    }
-    function updatePowerplay() {
+
+    function updateHud() {
         const team = state[state.battingSide];
-        const oversDone = Math.floor((team ? team.balls : 0) / 6);
-        // Powerplay = first 20% of overs (min 1 over)
-        state.powerplay = oversDone < Math.max(1, Math.round(state.maxOvers * 0.2));
+        const tag = state.battingSide === 'p1' ? 'YOU' : (state.mode === 'ai' ? 'AI' : 'P2');
+        $('battingTeamTag').textContent = tag;
+        $('liveScore').textContent = team.score;
+        $('liveWickets').textContent = team.wickets;
+        $('liveOvers').textContent = `(${Math.floor(team.balls / 6)}.${team.balls % 6}/${state.maxOvers})`;
+
+        if (state.target !== null) {
+            $('targetBadge').style.display = 'inline-block';
+            const need = Math.max(0, state.target - team.score);
+            const left = Math.max(0, state.maxOvers * 6 - team.balls);
+            $('targetBadge').textContent = `NEED ${need} OFF ${left}B`;
+        } else {
+            $('targetBadge').style.display = 'none';
+        }
+
+        $('freeHitBadge').style.display = state.freeHit ? 'inline-block' : 'none';
+        $('powerplayBadge').style.display = state.powerplay ? 'inline-block' : 'none';
+
+        const st = currentStriker(), ns = currentNonStriker(), bw = currentBowler();
+        if (st) $('strikerHud').innerHTML = `🏏 <b>${st.name}</b> ${st.batRuns} (${st.batBalls})`;
+        if (ns) $('nonStrikerHud').innerHTML = `<b>${ns.name}</b> ${ns.batRuns} (${ns.batBalls})`;
+        if (bw) $('bowlerHud').innerHTML = `⚾ <b>${bw.name}</b> ${bw.bowlWkts}/${bw.bowlRuns} (${Math.floor(bw.bowlBalls / 6)}.${bw.bowlBalls % 6})`;
     }
-    function swapStrike() {
-        const t = state.strikerIdx; state.strikerIdx = state.nonStrikerIdx; state.nonStrikerIdx = t;
-        updatePlayersStrip();
-    }
-    function nextBatterIn() {
-        const squad = state.inningsData ? state.inningsData.batting : [];
-        if (state.nextBatterIdx >= squad.length) return null;
-        state.strikerIdx = state.nextBatterIdx;
-        state.nextBatterIdx += 1;
-        const b = squad[state.strikerIdx];
-        if (b) addLog(`New batter: ${b.name} (timing ${b.timing}, power ${b.power})`);
-        updatePlayersStrip();
-        return b;
+
+    function renderBowlerDropdown() {
+        const sel = $('bowlerSelectDropdown');
+        if (!sel || !state.inningsData) return;
+        sel.innerHTML = '';
+        state.inningsData.bowling.forEach((b, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = `${b.name} (${b.bowlType}, ${b.oversBowled}/${maxBowlerOvers()} ov)`;
+            opt.disabled = !bowlerAvailable(i) && i !== state.currentBowlerIdx;
+            if (i === state.currentBowlerIdx) opt.selected = true;
+            sel.appendChild(opt);
+        });
     }
 
     // ==========================================
-    // 3a. FIELD PLACEMENTS — 9 fielders, x/y in % of the pitch box
-    // y: 0 = bowler end (top), 100 = batter end (bottom). x: 0 = off side (left), 100 = leg side (right)
+    // 3. INTERACTIVE PITCH AIM & 360° SHOT AIM
+    // ==========================================
+    function updatePitchReticle() {
+        const marker = $('pitchMarker');
+        if (!marker) return;
+        marker.style.left = `${state.aimX}%`;
+        marker.style.top = `${state.aimY}%`;
+        $('lengthLabel').textContent = getLengthLabelFromY(state.aimY).toUpperCase();
+    }
+
+    function getLengthLabelFromY(yPct) {
+        if (yPct >= 70) return 'Yorker';
+        if (yPct >= 58) return 'Full';
+        if (yPct >= 44) return 'Good Length';
+        return 'Short / Bouncer';
+    }
+
+    function getLengthCategoryFromY(yPct) {
+        if (yPct >= 70) return 'yorker';
+        if (yPct >= 58) return 'full';
+        if (yPct >= 44) return 'good';
+        return 'short';
+    }
+
+    function getLineCategoryFromX(xPct) {
+        if (xPct < 46) return 'off';
+        if (xPct > 54) return 'leg';
+        return 'middle';
+    }
+
+    // Click or drag directly on the pitch to place the ball bounce spot
+    function bindPitchAiming() {
+        const stage = $('cameraStage');
+        const strip = $('pitchStrip');
+        if (!stage || !strip) return;
+
+        let aiming = false;
+        const setAimFromPointer = (clientX, clientY) => {
+            if (isLocalBatting() || state.ballInFlight) return;
+            const r = stage.getBoundingClientRect();
+            const nx = ((clientX - r.left) / r.width) * 100;
+            const ny = ((clientY - r.top) / r.height) * 100;
+            // Constrain within playable pitch corridor
+            state.aimX = Math.max(36, Math.min(64, nx));
+            state.aimY = Math.max(34, Math.min(76, ny));
+            updatePitchReticle();
+        };
+
+        strip.addEventListener('pointerdown', (e) => {
+            if (isLocalBatting() || state.ballInFlight) return;
+            aiming = true;
+            SoundFX.click();
+            setAimFromPointer(e.clientX, e.clientY);
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (aiming) setAimFromPointer(e.clientX, e.clientY);
+            // When batting, moving mouse horizontally gently steers 360° shot angle
+            if (isLocalBatting() && $('gameScreen').classList.contains('active') && !state.shotTaken) {
+                const ratio = (e.clientX / window.innerWidth) * 2 - 1; // -1 to +1
+                state.shotAngle = Math.round(ratio * 135);
+                updateShotAimGuide();
+            }
+        });
+
+        window.addEventListener('pointerup', () => { aiming = false; });
+    }
+
+    function updateShotAimGuide() {
+        const guide = $('shotAimGuide');
+        if (!guide) return;
+        guide.style.transform = `translateX(-50%) rotate(${state.shotAngle}deg)`;
+    }
+
+    // ==========================================
+    // 4. TACTICAL 9-FIELDER PLACEMENT + POWERPLAY RULES
     // ==========================================
     const FIELD_PRESETS = {
         attacking: [
-            { id: 'slip', name: 'Slip', short: 'SLIP', x: 38, y: 76 },
-            { id: 'gully', name: 'Gully', short: 'GULLY', x: 28, y: 68 },
-            { id: 'point', name: 'Point', short: 'POINT', x: 20, y: 58 },
-            { id: 'cover', name: 'Cover', short: 'COVER', x: 28, y: 38 },
-            { id: 'midoff', name: 'Mid-off', short: 'MID-OFF', x: 42, y: 26 },
-            { id: 'midon', name: 'Mid-on', short: 'MID-ON', x: 58, y: 26 },
-            { id: 'squareleg', name: 'Square Leg', short: 'SQ LEG', x: 76, y: 58 },
-            { id: 'fineleg', name: 'Fine Leg', short: 'FINE', x: 74, y: 84 },
-            { id: 'shortleg', name: 'Short Leg', short: 'S-LEG', x: 62, y: 70 }
+            { id: 'slip1', short: 'SLIP', x: 41, y: 74 },
+            { id: 'gully', short: 'GULLY', x: 31, y: 67 },
+            { id: 'point', short: 'POINT', x: 24, y: 56 },
+            { id: 'cover', short: 'COVER', x: 30, y: 42 },
+            { id: 'midoff', short: 'MID-OFF', x: 42, y: 34 },
+            { id: 'midon', short: 'MID-ON', x: 58, y: 34 },
+            { id: 'sqleg', short: 'SQ LEG', x: 74, y: 56 },
+            { id: 'fineleg', short: 'FINE', x: 68, y: 78 },
+            { id: 'shortleg', short: 'S-LEG', x: 60, y: 68 }
         ],
         balanced: [
-            { id: 'slip', name: 'Slip', short: 'SLIP', x: 38, y: 76 },
-            { id: 'point', name: 'Point', short: 'POINT', x: 18, y: 54 },
-            { id: 'cover', name: 'Cover', short: 'COVER', x: 26, y: 36 },
-            { id: 'midoff', name: 'Mid-off', short: 'MID-OFF', x: 40, y: 24 },
-            { id: 'midon', name: 'Mid-on', short: 'MID-ON', x: 60, y: 24 },
-            { id: 'squareleg', name: 'Square Leg', short: 'SQ LEG', x: 78, y: 54 },
-            { id: 'fineleg', name: 'Fine Leg', short: 'FINE', x: 76, y: 86 },
-            { id: 'longon', name: 'Long-on', short: 'LONG-ON', x: 62, y: 12 },
-            { id: 'longoff', name: 'Long-off', short: 'LONG-OFF', x: 38, y: 12 }
+            { id: 'slip1', short: 'SLIP', x: 41, y: 74 },
+            { id: 'point', short: 'POINT', x: 23, y: 55 },
+            { id: 'cover', short: 'COVER', x: 28, y: 40 },
+            { id: 'midoff', short: 'MID-OFF', x: 41, y: 33 },
+            { id: 'midon', short: 'MID-ON', x: 59, y: 33 },
+            { id: 'sqleg', short: 'SQ LEG', x: 76, y: 55 },
+            { id: 'fineleg', short: 'FINE', x: 70, y: 80 },
+            { id: 'longoff', short: 'LONG-OFF', x: 35, y: 22 },
+            { id: 'deepmid', short: 'D-MIDWKT', x: 78, y: 30 }
         ],
         defensive: [
-            { id: 'deeppoint', name: 'Deep Point', short: 'D-POINT', x: 12, y: 48 },
-            { id: 'deepcover', name: 'Deep Cover', short: 'D-COVER', x: 20, y: 26 },
-            { id: 'longoff', name: 'Long-off', short: 'LONG-OFF', x: 38, y: 8 },
-            { id: 'longon', name: 'Long-on', short: 'LONG-ON', x: 62, y: 8 },
-            { id: 'deepmidwicket', name: 'Deep Mid-wicket', short: 'D-MID', x: 78, y: 28 },
-            { id: 'deepsquare', name: 'Deep Square', short: 'D-SQ', x: 84, y: 52 },
-            { id: 'deepfine', name: 'Deep Fine Leg', short: 'D-FINE', x: 82, y: 88 },
-            { id: 'thirdman', name: 'Third Man', short: '3RD MAN', x: 18, y: 88 },
-            { id: 'midoff', name: 'Mid-off', short: 'MID-OFF', x: 42, y: 30 }
+            { id: 'deeppt', short: 'D-POINT', x: 14, y: 52 },
+            { id: 'deepcov', short: 'D-COVER', x: 20, y: 32 },
+            { id: 'longoff', short: 'LONG-OFF', x: 36, y: 21 },
+            { id: 'longon', short: 'LONG-ON', x: 64, y: 21 },
+            { id: 'deepmid', short: 'D-MIDWKT', x: 80, y: 32 },
+            { id: 'deepsq', short: 'D-SQ', x: 85, y: 54 },
+            { id: 'deepfine', short: 'D-FINE', x: 76, y: 82 },
+            { id: 'thirdman', short: '3RD MAN', x: 22, y: 82 },
+            { id: 'midoff', short: 'MID-OFF', x: 42, y: 36 }
         ]
     };
-    function cloneField(preset) {
-        return FIELD_PRESETS[preset].map(f => ({ ...f, deep: false, homeX: f.x, homeY: f.y }));
+
+    function isOutsideRing(x, y) {
+        const dx = (x - 50) / 28;
+        const dy = (y - 52) / 34;
+        return (dx * dx + dy * dy) > 1.0;
     }
+
+    function countOutsideFielders() {
+        return state.field.filter(f => isOutsideRing(f.x, f.y)).length;
+    }
+
+    function setFieldPreset(name) {
+        if (!FIELD_PRESETS[name]) return;
+        state.fieldPreset = name;
+        state.field = FIELD_PRESETS[name].map(f => ({ ...f }));
+        // Enforce Powerplay max 2 outside 30-yard circle
+        if (state.powerplay) {
+            let outside = 0;
+            state.field.forEach(f => {
+                if (isOutsideRing(f.x, f.y)) {
+                    outside++;
+                    if (outside > 2) {
+                        f.x = 50 + (f.x - 50) * 0.62;
+                        f.y = 52 + (f.y - 52) * 0.62;
+                    }
+                }
+            });
+        }
+        renderFielders();
+        document.querySelectorAll('#fieldPresetGroup button').forEach(b => b.classList.toggle('active', b.dataset.val === name));
+    }
+
     function renderFielders() {
         const box = $('fielders');
         if (!box) return;
         box.innerHTML = '';
         state.field.forEach(f => {
             const el = document.createElement('div');
-            el.className = 'fielder' + (f.y < 35 ? ' far' : f.y > 75 ? ' near' : '');
+            el.className = 'fielder' + (f.y < 36 ? ' far' : f.y > 70 ? ' near' : '');
             el.dataset.id = f.id;
             el.style.left = `${f.x}%`;
             el.style.top = `${f.y}%`;
-            el.title = `${f.name} — click to move in / out`;
             el.innerHTML = `<span class="fielder-head"></span><span class="fielder-body"></span><span class="fielder-label">${f.short}</span>`;
-            el.addEventListener('click', (e) => {
+
+            let dragging = false;
+            el.addEventListener('pointerdown', (e) => {
+                if (isLocalBatting() || state.ballInFlight) return;
                 e.stopPropagation();
-                SoundFX.click();
-                nudgeFielder(f.id);
+                dragging = true;
+                el.classList.add('dragging');
+                const stage = $('cameraStage');
+                const onMove = (ev) => {
+                    if (!dragging) return;
+                    const r = stage.getBoundingClientRect();
+                    const nx = Math.max(8, Math.min(92, ((ev.clientX - r.left) / r.width) * 100));
+                    const ny = Math.max(20, Math.min(88, ((ev.clientY - r.top) / r.height) * 100));
+
+                    // Powerplay restriction check (max 2 outside 30-yard circle)
+                    if (state.powerplay && isOutsideRing(nx, ny) && !isOutsideRing(f.x, f.y) && countOutsideFielders() >= 2) {
+                        $('statusMsg').textContent = '⚠️ Powerplay rule: Max 2 fielders allowed outside the 30-yard ring!';
+                        return;
+                    }
+                    f.x = nx;
+                    f.y = ny;
+                    el.style.left = `${nx}%`;
+                    el.style.top = `${ny}%`;
+                    el.classList.toggle('far', ny < 36);
+                    el.classList.toggle('near', ny > 70);
+                };
+                const onUp = () => {
+                    dragging = false;
+                    el.classList.remove('dragging');
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                };
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
             });
+
             box.appendChild(el);
         });
     }
-    function setFieldPreset(name) {
-        if (!FIELD_PRESETS[name]) return;
-        state.fieldPreset = name;
-        state.field = cloneField(name);
-        renderFielders();
-        const status = $('fieldStatus');
-        if (status) status.textContent = `Field: ${name[0].toUpperCase() + name.slice(1)} — 9 fielders set. Click a fielder to move him in / out.`;
-        const group = $('fieldPresetGroup');
-        if (group) group.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === name));
-    }
-    function nudgeFielder(id) {
-        const f = state.field.find(x => x.id === id);
-        if (!f) return;
-        // Toggle in <-> out. Out = further from the batter, wider from the centre.
-        if (!f.deep) {
-            f.deep = true;
-            f.x = Math.max(8, Math.min(92, 50 + (f.x - 50) * 1.3));
-            f.y = Math.max(5, f.y - 16);
-        } else {
-            f.deep = false;
-            f.x = f.homeX; f.y = f.homeY;
-        }
-        const el = document.querySelector(`.fielder[data-id="${id}"]`);
-        if (el) { el.style.left = `${f.x}%`; el.style.top = `${f.y}%`; }
-        const status = $('fieldStatus');
-        if (status) status.textContent = `Field: ${state.fieldPreset} — ${f.name} moved ${f.deep ? 'out (deeper)' : 'back in'}.`;
-    }
+
     function nearestFielder(x, y) {
         let best = null, bestDist = Infinity;
         state.field.forEach(f => {
-            const dx = f.x - x, dy = (f.y - y) * 1.15;
-            const d = Math.sqrt(dx * dx + dy * dy);
+            const dx = f.x - x;
+            const dy = (f.y - y) * 1.1;
+            const d = Math.hypot(dx, dy);
             if (d < bestDist) { bestDist = d; best = f; }
         });
         return { fielder: best, dist: bestDist };
     }
-    function computeLanding(shot, delivery) {
-        // Where the ball ends up after the shot, in pitch-box %.
-        // Straight = back past the bowler (top), Off = left, Leg = right.
-        const baseX = shot.dir === 'off' ? 20 : shot.dir === 'leg' ? 80 : 50;
-        const power = shot.timing === 'perfect' ? 1.25 : shot.timing === 'good' ? 1 : 0.75;
-        let x = baseX, y = 45;
-        if (shot.type === 'loft') { x = baseX; y = 6; }
-        else if (shot.type === 'ground') { y = 32 / power; x = baseX + (shot.dir === 'straight' ? 0 : (baseX - 50) * 0.2); }
-        else if (shot.type === 'cutpull') { x = shot.dir === 'leg' ? 86 : 14; y = 55; }
-        else if (shot.type === 'sweep') { x = 86; y = 62; }
-        else if (shot.type === 'defend') { x = 50; y = 78; }
-        return { x: Math.max(6, Math.min(94, x)), y: Math.max(4, Math.min(92, y)) };
-    }
 
     // ==========================================
-    // 3a. PERSPECTIVE CAMERA + SMOOTH PLAYER ANIMATION
+    // 5. VISUAL POSITIONS & CAMERA ENGINE
     // ==========================================
-    const CAMERA_LABELS = {
-        bowler: '\uD83D\uDCF7 Behind Bowler \u2014 from behind the bowling wicket',
-        batter: '\uD83D\uDCF7 Behind Batter \u2014 top view',
-        broadcast: '\uD83D\uDCFA Broadcast \u2014 whole pitch'
-    };
+    function updateVisualPositions() {
+        const guard = getActiveVal('batterGuardGroup');
+        const depth = getActiveVal('footworkGroup');
+        const batEl = $('batsman');
+        const batX = guard === 'off' ? -24 : guard === 'leg' ? 24 : 0;
+        const batY = depth === 'advance' ? -20 : depth === 'back' ? 14 : 0;
+        batEl.style.setProperty('--batter-x', `${batX}px`);
+        batEl.style.setProperty('--batter-y', `${batY}px`);
+
+        const angle = getActiveVal('bowlAngleGroup');
+        const bowlEl = $('bowlerEnd');
+        const bowlX = angle === 'wide' ? -22 : angle === 'round' ? 22 : -6;
+        bowlEl.style.setProperty('--bowler-x', `${bowlX}px`);
+    }
+
     function setCamera(mode) {
         const pitch = $('pitch');
         if (!pitch) return;
         state.cameraMode = mode;
         pitch.classList.remove('cam-bowler', 'cam-batter', 'cam-broadcast');
         pitch.classList.add(`cam-${mode}`);
-        document.querySelectorAll('.cam-btn').forEach(b => b.classList.toggle('active', b.dataset.cam === mode));
-        const label = $('cameraLabel');
-        if (label) label.textContent = CAMERA_LABELS[mode] || '';
+        document.querySelectorAll('.hud-btn[data-cam]').forEach(b => b.classList.toggle('active', b.dataset.cam === mode));
     }
+
+    function showBanner(bigText, subText, duration = 2200) {
+        const big = $('bannerBig');
+        const sub = $('ballResult');
+        if (big) big.textContent = bigText;
+        if (sub) sub.textContent = subText;
+        if (bigText) {
+            setTimeout(() => { if (big.textContent === bigText) big.textContent = ''; }, duration);
+        }
+    }
+
+    function umpireSignal(kind) {
+        const u = $('umpire');
+        if (!u) return;
+        u.classList.remove('signal-four', 'signal-six', 'signal-out', 'signal-wide');
+        if (!kind) return;
+        u.classList.add('signal-' + kind);
+        setTimeout(() => u.classList.remove('signal-' + kind), 2000);
+    }
+
     function playBowlerRunUp(onRelease) {
         const fig = $('bowlerFigure');
+        const end = $('bowlerEnd');
         const myId = state.deliveryId;
-        const tracked = (fn, ms) => { const id = setTimeout(() => { if (myId !== state.deliveryId) return; fn(); }, ms); state.runUpTimers.push(id); };
-        if (!fig) { onRelease(); return; }
-        fig.classList.remove('delivering', 'follow-through');
-        void fig.offsetWidth;
-        fig.classList.add('running');
+        const tracked = (fn, ms) => {
+            const id = setTimeout(() => { if (myId === state.deliveryId) fn(); }, ms);
+            state.runUpTimers.push(id);
+        };
+
+        if (end) {
+            end.style.transition = 'none';
+            end.style.top = '18vh';
+            void end.offsetWidth;
+            end.style.transition = 'transform 0.3s ease, top 1.05s linear';
+            end.style.top = '25vh';
+        }
+        if (fig) {
+            fig.classList.remove('delivering');
+            fig.classList.add('running');
+        }
         setCamera('bowler');
+        $('statusMsg').textContent = 'Bowler running in...';
+
         tracked(() => {
-            fig.classList.remove('running');
-            fig.classList.add('delivering');
+            if (fig) {
+                fig.classList.remove('running');
+                fig.classList.add('delivering');
+            }
             SoundFX.bowlWhoosh();
             tracked(() => {
-                fig.classList.remove('delivering');
-                fig.classList.add('follow-through');
+                if (fig) fig.classList.remove('delivering');
                 setCamera('batter');
                 onRelease();
-                tracked(() => fig.classList.remove('follow-through'), 950);
-            }, 300);
-        }, 620);
-    }
-    function playBatterShotAnimation(type) {
-        const fig = $('batterFigure');
-        if (!fig) return;
-        const map = { defend: 'defend', ground: 'ground', cutpull: 'cutpull', sweep: 'sweep', loft: 'loft' };
-        const anim = map[type];
-        if (!anim) return;
-        fig.classList.remove('anim-defend', 'anim-ground', 'anim-cutpull', 'anim-sweep', 'anim-loft');
-        void fig.offsetWidth; // force reflow so the same shot can replay smoothly
-        fig.classList.add(`anim-${anim}`);
-        setTimeout(() => fig.classList.remove(`anim-${anim}`), 680);
-    }
-    function resetPlayers() {
-        const bowler = $('bowlerFigure');
-        if (bowler) bowler.classList.remove('running', 'delivering', 'follow-through');
-        const batter = $('batterFigure');
-        if (batter) batter.classList.remove('anim-defend', 'anim-ground', 'anim-cutpull', 'anim-sweep', 'anim-loft');
+            }, 280);
+        }, 1050);
     }
 
+    function animateBallPath(from, to, durationMs, opts, onDone) {
+        const ball = $('ball'), shadow = $('ballShadow');
+        if (!ball) { if (onDone) onDone(); return; }
+        const start = performance.now();
+        const arc = (opts && opts.arc) || 0;
+        const startScale = (opts && opts.startScale) || 1.0;
+        const endScale = (opts && opts.endScale) || 0.85;
 
-    function getLengthCategory(val) {
-        const n = Number(val);
-        if (n >= 76) return 'yorker';
-        if (n >= 62) return 'full';
-        if (n >= 40) return 'good';
-        return 'short';
+        ball.style.opacity = '1';
+        if (shadow) shadow.style.opacity = '0.5';
+
+        function step(now) {
+            const t = Math.min(1, (now - start) / durationMs);
+            const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            const x = from.x + (to.x - from.x) * e;
+            const y = from.y + (to.y - from.y) * e;
+            const lift = -Math.sin(t * Math.PI) * arc;
+            const scale = startScale + (endScale - startScale) * e;
+
+            ball.style.left = `${x}%`;
+            ball.style.top = `${y}%`;
+            ball.style.transform = `translate(-50%, -50%) translateY(${lift}px) scale(${scale.toFixed(2)})`;
+
+            if (shadow) {
+                shadow.style.left = `${x}%`;
+                shadow.style.top = `${y + 1.5}%`;
+                shadow.style.opacity = lift < -15 ? '0.25' : '0.5';
+            }
+
+            if (t < 1) requestAnimationFrame(step);
+            else if (onDone) onDone();
+        }
+        requestAnimationFrame(step);
     }
 
-    function getLengthLabel(val) {
-        const cat = getLengthCategory(val);
-        return cat === 'yorker' ? 'Yorker' :
-               cat === 'full' ? 'Full / Half-Volley' :
-               cat === 'good' ? 'Good Length' : 'Short / Bouncer';
+    function throwBallBackToBowler(onDone) {
+        const ball = $('ball');
+        if (!ball) { if (onDone) onDone(); return; }
+        const cur = { x: parseFloat(ball.style.left) || 50, y: parseFloat(ball.style.top) || 45 };
+        animateBallPath(cur, { x: 50, y: 26 }, 700, { arc: 18, startScale: 0.85, endScale: 0.55 }, () => {
+            ball.style.opacity = '0';
+            if ($('ballShadow')) $('ballShadow').style.opacity = '0';
+            if (onDone) onDone();
+        });
     }
 
     // ==========================================
-    // 4. UI BINDINGS & KEYBOARD CREASE CONTROLS
-    // ==========================================
-    function bindGroup(groupId, callback) {
-        const group = $(groupId);
-        if (!group) return;
-        group.querySelectorAll('button').forEach(btn => {
-            btn.addEventListener('click', () => {
-                SoundFX.click();
-                group.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                updateVisualPositions();
-                if (callback) callback(btn.dataset);
-            });
-        });
-    }
-
-    function selectButtonByVal(groupId, val) {
-        const group = $(groupId);
-        if (!group) return;
-        group.querySelectorAll('button').forEach(b => {
-            b.classList.toggle('active', b.dataset.val === val);
-        });
-        updateVisualPositions();
-    }
-
-    bindGroup('oversSelect', (d) => { state.maxOvers = Number(d.overs); });
-    bindGroup('difficultySelect', (d) => { state.difficulty = d.diff; });
-    bindGroup('modeSelect', (d) => {
-        state.mode = d.mode;
-        $('aiSetupPanel').style.display = d.mode === 'ai' ? 'block' : 'none';
-        $('onlineSetupPanel').style.display = d.mode === 'online' ? 'block' : 'none';
-    });
-
-    bindGroup('batterGuardGroup');
-    bindGroup('footworkGroup');
-    bindGroup('shotTypeGroup');
-    bindGroup('shotDirGroup');
-    bindGroup('bowlAngleGroup');
-    bindGroup('bowlLineGroup');
-    bindGroup('bowlVarGroup');
-    bindGroup('fieldPresetGroup', (d) => setFieldPreset(d.val));
-    document.querySelectorAll('.run-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            SoundFX.click();
-            chooseRuns(Number(btn.dataset.runs));
-        });
-    });
-
-    // Camera buttons: Behind Bowler / Behind Batter / Broadcast
-    document.querySelectorAll('.cam-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            SoundFX.click();
-            setCamera(btn.dataset.cam);
-        });
-    });
-
-    $('bowlLengthSlider').addEventListener('input', (e) => {
-        $('lengthLabel').textContent = getLengthLabel(e.target.value);
-    });
-
-    $('bowlSpeedSlider').addEventListener('input', (e) => {
-        $('paceVal').textContent = e.target.value;
-    });
-
-    const _reroll = $('rerollConditionsBtn');
-    if (_reroll) _reroll.addEventListener('click', () => { SoundFX.click(); generateConditions(); renderConditions(); setTicker(`Conditions re-rolled — now ${state.conditions.weather}, ${state.conditions.tempC}°C, wind ${windDesc(state.conditions)}, dew ${dewLabel(state.conditions.dew)} at ${state.conditions.venue}.`); });
-    // Conditions for the very first visit, before Start is pressed
-    if (!state.conditions) { generateConditions(); renderConditions(); buildCrowd(); }
-    $('soundToggleBtn').addEventListener('click', () => {
-        const isMuted = SoundFX.toggleMute();
-        $('soundToggleBtn').textContent = isMuted ? '🔇 SFX: OFF' : '🔊 SFX: ON';
-        $('soundToggleBtn').classList.toggle('muted', isMuted);
-    });
-
-    // Live Keyboard Controls (Move around crease with WASD + Shot keys 1-5 + Arrows + Space)
-    document.addEventListener('keydown', (e) => {
-        if (!$('gameScreen').classList.contains('active')) return;
-        if (!isLocalBatting()) return;
-
-        const key = e.key.toLowerCase();
-
-        // Lateral Crease Shuffle (A = Off stump, D = Leg stump / Room)
-        if (key === 'a') {
-            const cur = getActiveVal('batterGuardGroup');
-            selectButtonByVal('batterGuardGroup', cur === 'leg' ? 'middle' : 'off');
-            SoundFX.step();
-        }
-        if (key === 'd') {
-            const cur = getActiveVal('batterGuardGroup');
-            selectButtonByVal('batterGuardGroup', cur === 'off' ? 'middle' : 'leg');
-            SoundFX.step();
-        }
-
-        // Depth in Crease (W = Advance down pitch, S = Deep back in crease)
-        if (key === 'w') {
-            const cur = getActiveVal('footworkGroup');
-            selectButtonByVal('footworkGroup', cur === 'back' ? 'crease' : 'advance');
-            SoundFX.step();
-        }
-        if (key === 's') {
-            const cur = getActiveVal('footworkGroup');
-            selectButtonByVal('footworkGroup', cur === 'advance' ? 'crease' : 'back');
-            SoundFX.step();
-        }
-
-        // Shot type shortcuts (1-5)
-        const shotKeys = { '1': 'defend', '2': 'ground', '3': 'cutpull', '4': 'sweep', '5': 'loft' };
-        if (shotKeys[e.key]) {
-            selectButtonByVal('shotTypeGroup', shotKeys[e.key]);
-            SoundFX.click();
-        }
-
-        // Placement shortcuts
-        if (e.key === 'ArrowLeft') { selectButtonByVal('shotDirGroup', 'off'); SoundFX.click(); }
-        if (e.key === 'ArrowUp') { selectButtonByVal('shotDirGroup', 'straight'); SoundFX.click(); }
-        if (e.key === 'ArrowRight') { selectButtonByVal('shotDirGroup', 'leg'); SoundFX.click(); }
-
-        // Running choice by keyboard: 1 / 2 / 3 / 0 while the running panel is open
-        if ($('runningPanel') && $('runningPanel').style.display !== 'none' && state.pendingRun) {
-            if (['1', '2', '3'].includes(e.key)) { chooseRuns(Number(e.key)); return; }
-            if (e.key === '0') { chooseRuns(0); return; }
-        }
-        if (e.key.toLowerCase() === 'r' && !state.ballInFlight) { replayLastBall(); return; }
-
-        // Swing Bat
-        if (e.code === 'Space' && state.ballInFlight && !state.shotTaken) {
-            e.preventDefault();
-            triggerBatterSwing();
-        }
-    });
-
-    function getActiveVal(groupId) {
-        const group = $(groupId);
-        if (!group) return '';
-        const active = group.querySelector('.active');
-        return active ? active.dataset.val : '';
-    }
-    function clearAllTimers() {
-        // Audit fix: run-up / running / replay timers used to fire after Restart or a new ball.
-        state.runUpTimers.forEach(id => clearTimeout(id));
-        state.runUpTimers = [];
-        if (state.runTimer) { clearTimeout(state.runTimer); state.runTimer = null; }
-        if (state.flightAnimId) cancelAnimationFrame(state.flightAnimId);
-        state.flightAnimId = null;
-        state.ballInFlight = false;
-        state.pendingRun = null;
-    }
-
-    function showScreen(screenId) {
-        ['startScreen', 'gameScreen', 'resultScreen'].forEach(id => {
-            $(id).classList.toggle('active', id === screenId);
-        });
-    }
-
-    function formatOvers(balls) {
-        return `${Math.floor(balls / 6)}.${balls % 6} / ${state.maxOvers} overs`;
-    }
-
-    function addLog(text, type = '') {
-        const div = document.createElement('div');
-        div.className = `log-entry ${type}`;
-        div.textContent = text;
-        const logBox = $('gameLog');
-        logBox.insertBefore(div, logBox.firstChild);
-    }
-
-    function updateScoreboard() {
-        updateTVScorebug();
-        $('p1Score').textContent = state.p1.score;
-        $('p1Wickets').textContent = state.p1.wickets;
-        $('p1Overs').textContent = formatOvers(state.p1.balls);
-
-        $('p2Score').textContent = state.p2.score;
-        $('p2Wickets').textContent = state.p2.wickets;
-        $('p2Overs').textContent = formatOvers(state.p2.balls);
-
-        $('p1Card').classList.toggle('active-turn', state.battingSide === 'p1');
-        $('p2Card').classList.toggle('active-turn', state.battingSide === 'p2');
-
-        if (state.target !== null) {
-            $('targetBadge').style.display = 'inline-block';
-            const chasing = state[state.battingSide];
-            const runsNeeded = Math.max(0, state.target - chasing.score);
-            const ballsLeft = Math.max(0, (state.maxOvers * 6) - chasing.balls);
-            $('targetBadge').textContent = `Target: ${state.target} (Need ${runsNeeded} off ${ballsLeft}b)`;
-        } else {
-            $('targetBadge').style.display = 'none';
-        }
-    }
-
-    // ==========================================
-    // 5. REAL-TIME ANGLED BALL FLIGHT ENGINE
+    // 6. REAL-TIME BALL FLIGHT & PHYSICS
     // ==========================================
     function getTimingFromProgress(pct, depth) {
-        // Advancing down the pitch meets the ball earlier (64%-79%), staying deep meets it later (78%-93%)
-        // Better batters get a wider sweet spot; tail-enders get a narrower one.
         const st = currentStriker();
-        const sweetWidth = st ? Math.max(10, Math.min(22, 15 + (st.timing - 70) * 0.18)) : 15;
+        const sweetWidth = st ? Math.max(11, Math.min(22, 15 + (st.timing - 72) * 0.16)) : 15;
         const sweetMin = depth === 'advance' ? 64 : depth === 'back' ? 78 : 72;
         const sweetMax = sweetMin + sweetWidth;
 
         if (pct >= sweetMin && pct <= sweetMax) return 'perfect';
-        if ((pct >= sweetMin - 16 && pct < sweetMin) || (pct > sweetMax && pct <= sweetMax + 10)) return 'good';
+        if ((pct >= sweetMin - 15 && pct < sweetMin) || (pct > sweetMax && pct <= sweetMax + 10)) return 'good';
         return pct < sweetMin ? 'early' : 'late';
     }
 
@@ -828,131 +635,100 @@
         if (state.flightAnimId) cancelAnimationFrame(state.flightAnimId);
         state.deliveryId += 1;
         state.replayFrames = [];
-        const _rb0 = $('replayBtn'); if (_rb0) _rb0.disabled = true;
+        $('replayBtn').disabled = true;
         state.replaying = false;
 
-        // --- Extras decision (host decides, guest reuses delivery.extra) ---
         if (delivery.extra === undefined) {
-            const _dewWide = state.conditions ? state.conditions.dew/100*0.07 : 0;
-            const wideChance = ((delivery.line === 'off' && delivery.angle === 'wide') ? 0.30 : (delivery.line === 'leg' && delivery.angle === 'round') ? 0.20 : 0.04) + _dewWide + (state.conditions && state.conditions.windKmh>=22 ? 0.03 : 0);
+            const wideChance = (delivery.aimX <= 38 || delivery.aimX >= 62) ? 0.25 : 0.03;
             const r = Math.random();
             if (r < wideChance) delivery.extra = 'wide';
-            else if (r < wideChance + (delivery.speed >= 150 ? 0.12 : 0.05)) delivery.extra = 'noball';
+            else if (r < wideChance + (delivery.speed >= 150 ? 0.1 : 0.04)) delivery.extra = 'noball';
             else delivery.extra = null;
-            // Fatigue: a tired bowler loses pace and is more likely to stray
-            const bw0 = currentBowler();
-            if (bw0 && bw0.fatigue > 0.3) delivery.speed = Math.max(85, Math.round(delivery.speed - bw0.fatigue * 12));
+
+            const bw = currentBowler();
+            if (bw && bw.fatigue > 0.3) delivery.speed = Math.max(85, Math.round(delivery.speed - bw.fatigue * 10));
         }
+
         state.activeDelivery = delivery;
         state.ballInFlight = true;
         state.shotTaken = false;
         state.flightProgress = 0;
 
-        // Bowler lateral start (old top-% values become horizontal offsets in perspective)
-        const startY = delivery.angle === 'wide' ? 22 : delivery.angle === 'round' ? 72 : 36;
-        const startX = 50 + (startY - 50) * 0.28;
-        $('bowlerEnd').style.setProperty('--bowler-x', `${delivery.angle === 'wide' ? -26 : delivery.angle === 'round' ? 26 : -8}px`);
+        const startX = delivery.angle === 'wide' ? 44 : delivery.angle === 'round' ? 56 : 48;
+        const bounceY = delivery.aimY; // 34..76%
+        const bounceX = delivery.extra === 'wide' ? (delivery.aimX < 50 ? 34 : 66) : delivery.aimX;
 
-        // Telemetry display
-        $('telAngle').textContent = delivery.angle.toUpperCase();
-        $('telSpeed').textContent = delivery.speed;
-        $('telLine').textContent = delivery.line.toUpperCase();
-        $('telLength').textContent = getLengthLabel(delivery.lengthVal).toUpperCase();
-        $('telMove').textContent = delivery.variation.toUpperCase();
-
-        // Bounce marker — now along the vertical pitch.
-        // Short bounces early (near the bowler, ~40% down), yorker bounces late (near the batter, ~75%).
-        const marker = $('pitchMarker');
-        const bounceTop = 34 + (Number(delivery.lengthVal) * 0.44);
-        const targetY = delivery.line === 'off' ? 28 : delivery.line === 'leg' ? 72 : 50;
-        let targetX = 50 + (targetY - 50) * 0.32;
-        if (delivery.extra === 'wide') targetX = delivery.line === 'leg' ? 94 : 6;
-        marker.style.top = `${bounceTop}%`;
-        marker.style.left = `${targetX}%`;
-        marker.style.opacity = '1';
-
-        const ball = $('ball');
-        const shadow = $('ballShadow');
+        const ball = $('ball'), shadow = $('ballShadow');
         ball.style.opacity = '1';
-        if (shadow) shadow.style.opacity = '0.55';
-        ball.style.top = '14%';
+        shadow.style.opacity = '0.5';
+        ball.style.top = '26%';
         ball.style.left = `${startX}%`;
 
         if (isLocalBatting()) {
             $('playShotBtn').disabled = false;
-            $('readyToBatBtn').disabled = true;
-            $('statusMsg').textContent = '\uD83C\uDFB3 Bowler running in from behind the wicket...';
-        } else {
-            $('statusMsg').textContent = '\uD83C\uDFB3 Bowler running in...';
+            $('runNowBtn').style.display = 'none';
+            state.runRequested = false;
         }
 
-        const _cond = state.conditions;
-        const _windAlong = _cond ? _cond.windAlong : 0;
-        const flightDurationMs = Math.max(1500, 2950 - (delivery.speed * 9.5) + (_windAlong===-1?180:_windAlong===1?-140:0));
+        const flightDurationMs = Math.max(1450, 2850 - (delivery.speed * 9));
+        const bouncePct = ((bounceY - 26) / (84 - 26)) * 100;
 
-        // Start the actual flight only after the run-up + delivery stride.
-        // That is what makes the camera move read as one smooth shot, not a cut.
-        playBowlerRunUp(() => startFlight());
+        playBowlerRunUp(() => {
+            $('statusMsg').textContent = isLocalBatting()
+                ? 'Aim shot (Mouse/Arrows), adjust crease (WASD), press SPACE!'
+                : 'Ball in flight...';
 
-        function startFlight() {
-            if (isLocalBatting()) {
-                $('statusMsg').textContent = '\uD83D\uDD25 BALL IN FLIGHT! Move in crease (WASD), pick shot & press SPACE!';
-            } else {
-                $('statusMsg').textContent = '\uD83C\uDFB3 Ball released! Watching batter react...';
-            }
             const startTime = performance.now();
             let bounced = false;
             let aiSwung = false;
-            const bouncePct = 28 + (Number(delivery.lengthVal) * 0.54);
 
             function frame(now) {
                 const elapsed = now - startTime;
                 const pct = Math.min(100, (elapsed / flightDurationMs) * 100);
                 state.flightProgress = pct;
-                // replay frames are filled in below, once xPos / yTop are known
-
                 $('timingCursor').style.left = `${pct}%`;
 
-                // Down the pitch: bowler (top, ~13%) -> batter (bottom, ~89%).
-                // Ball grows as it comes towards the camera — the perspective cue.
-                const yTop = 13 + (pct * 0.76);
-                ball.style.top = `${yTop}%`;
-
+                const yTop = 26 + (pct * 0.58); // 26% -> 84%
                 let xPos = startX;
-                // 🌬️ WIND: crosswind drifts the ball sideways as it travels; stronger wind = more drift.
-                const _windDrift = _cond ? _cond.windLateral * (_cond.windKmh/20) * 5.5 * (pct/100) : 0;
-                const _swingDrift = _cond ? _cond.swingBoost * 28 * (pct/100) * ((delivery.variation==='outswing')?-1:(delivery.variation==='inswing'||delivery.variation==='spin')?1:0) : 0;
+                const cond = state.conditions;
+                const windDrift = cond ? cond.windLateral * (cond.windKmh / 25) * 3.5 * (pct / 100) : 0;
+
                 if (pct < bouncePct) {
-                    const preRatio = pct / bouncePct;
-                    xPos = startX + (targetX - startX) * preRatio;
+                    const pre = pct / Math.max(1, bouncePct);
+                    // Late air swing before pitching
+                    const airSwing = delivery.variation === 'inswing' ? 2.5 * pre * pre :
+                                     delivery.variation === 'outswing' ? -2.5 * pre * pre : 0;
+                    xPos = startX + (bounceX - startX) * pre + airSwing;
                 } else {
                     if (!bounced) {
                         bounced = true;
                         SoundFX.pitchBounce();
                     }
-                    const postRatio = (pct - bouncePct) / (100 - bouncePct);
-                    const angleDrift = (targetX - startX) * 0.22;
-                    let deviation = angleDrift;
-                    if (delivery.variation === 'inswing' || delivery.variation === 'spin') deviation += 4;
-                    if (delivery.variation === 'outswing') deviation -= 4;
-                    xPos = targetX + (deviation * postRatio);
+                    const post = (pct - bouncePct) / Math.max(1, 100 - bouncePct);
+                    const angleContinue = (bounceX - startX) * 0.25;
+                    let seamTurn = 0;
+                    if (delivery.variation === 'inswing' || delivery.variation === 'spin') seamTurn = 3.8;
+                    if (delivery.variation === 'outswing') seamTurn = -3.8;
+                    if (delivery.variation === 'seam') seamTurn = (Math.random() < 0.5 ? 1.5 : -1.5);
+                    xPos = bounceX + (angleContinue + seamTurn) * post;
                 }
-                xPos += _windDrift + _swingDrift;
-                ball.style.left = `${xPos}%`;
+                xPos += windDrift;
 
-                // Small hop just after the bounce, then it settles back onto the pitch line
-                const lift = (pct > bouncePct && pct < bouncePct + 14)
-                    ? -Math.sin((pct - bouncePct) / 14 * Math.PI) * 9
+                const bounceHeight = bounceY < 45 ? 16 : bounceY > 68 ? 4 : 10;
+                const lift = pct > bouncePct
+                    ? -Math.sin(Math.min(1, (pct - bouncePct) / (100 - bouncePct)) * Math.PI) * bounceHeight
                     : 0;
-                const scale = 0.55 + (pct * 0.007);
+                const scale = 0.52 + (pct * 0.0068);
+
+                ball.style.left = `${xPos}%`;
+                ball.style.top = `${yTop}%`;
                 ball.style.transform = `translate(-50%, -50%) translateY(${lift}px) scale(${scale.toFixed(2)})`;
-                state.replayFrames.push({ pct, x: xPos, y: yTop, scale });
-                if (shadow) {
-                    shadow.style.top = `${yTop + 1.4}%`;
-                    shadow.style.left = `${xPos}%`;
-                    shadow.style.transform = `translate(-50%, 0) scale(${(1.05 - pct * 0.004).toFixed(2)})`;
-                    shadow.style.opacity = lift < -2 ? '0.3' : '0.55';
-                }
+
+                shadow.style.left = `${xPos}%`;
+                shadow.style.top = `${yTop + 1.2}%`;
+                shadow.style.opacity = lift < -6 ? '0.28' : '0.52';
+
+                state.replayFrames.push({ x: xPos, y: yTop, lift, scale });
 
                 if (aiBatterShot && !aiSwung && pct >= 78) {
                     aiSwung = true;
@@ -966,171 +742,340 @@
                 if (pct >= 100) {
                     state.ballInFlight = false;
                     ball.style.opacity = '0';
-                    if (shadow) shadow.style.opacity = '0';
-                    marker.style.opacity = '0';
+                    shadow.style.opacity = '0';
                     if (isLocalBatting()) {
                         $('playShotBtn').disabled = true;
-                        const leftShot = {
+                        submitBatterShot({
                             guard: getActiveVal('batterGuardGroup'),
                             footwork: getActiveVal('footworkGroup'),
                             type: 'leave',
-                            dir: 'straight',
+                            angle: 0,
                             timing: 'none'
-                        };
-                        submitBatterShot(leftShot);
+                        });
                     }
                     return;
                 }
-
                 state.flightAnimId = requestAnimationFrame(frame);
             }
-
             state.flightAnimId = requestAnimationFrame(frame);
-        }
+        });
     }
 
     function triggerBatterSwing() {
         if (!state.ballInFlight || state.shotTaken || !isLocalBatting()) return;
         state.shotTaken = true;
         $('playShotBtn').disabled = true;
+        $('runNowBtn').style.display = 'inline-block';
+        $('runNowBtn').disabled = false;
 
         const depth = getActiveVal('footworkGroup');
         const shot = {
             guard: getActiveVal('batterGuardGroup'),
             footwork: depth,
             type: getActiveVal('shotTypeGroup'),
-            dir: getActiveVal('shotDirGroup'),
+            angle: state.shotAngle,
             timing: getTimingFromProgress(state.flightProgress, depth)
         };
-
         submitBatterShot(shot);
     }
-
-    $('playShotBtn').addEventListener('click', triggerBatterSwing);
 
     function submitBatterShot(shot) {
         if (isLocalBatting()) recordBatterTendency(shot);
         if (state.mode === 'ai') {
             finishFlightAndResolve(state.activeDelivery, shot);
+        } else if (state.role === 'host') {
+            const outcome = resolveBall(state.activeDelivery, shot);
+            sendNet({ type: 'BALL_RESULT', delivery: state.activeDelivery, shot, outcome });
+            finishFlightAndResolve(state.activeDelivery, shot, outcome);
         } else {
-            if (state.role === 'host') {
-                const outcome = resolveBall(state.activeDelivery, shot);
-                sendNet({ type: 'BALL_RESULT', delivery: state.activeDelivery, shot, outcome });
-                finishFlightAndResolve(state.activeDelivery, shot, outcome);
-            } else {
-                sendNet({ type: 'BATTER_SHOT', shot });
-                $('statusMsg').textContent = '⏳ Shot played! Syncing outcome...';
-            }
+            sendNet({ type: 'BATTER_SHOT', shot });
         }
     }
 
-    function finishFlightAndResolve(delivery, shot, precomputedOutcome = null) {
+    function computeLanding360(shot) {
+        // Convert shotAngle (-135..+135 deg) & shot power into ground (x%, y%)
+        const rad = (shot.angle * Math.PI) / 180;
+        const dist = shot.type === 'loft' ? 46 :
+                     shot.type === 'defend' ? 10 :
+                     shot.timing === 'perfect' ? 38 :
+                     shot.timing === 'good' ? 28 : 18;
+        const x = 50 + Math.sin(rad) * dist;
+        const y = 82 - Math.cos(rad) * dist * 1.15;
+        return { x: Math.max(6, Math.min(94, x)), y: Math.max(20, Math.min(88, y)) };
+    }
+
+    function resolveBall(delivery, shot) {
+        const lengthCat = getLengthCategoryFromY(delivery.aimY);
+        const lineCat = getLineCategoryFromX(delivery.aimX);
+        const bw = currentBowler();
+
+        if (delivery.extra === 'wide') {
+            state.extras.wides += 1;
+            return { isOut: false, runs: 1, commentary: 'Wide delivery! +1 extra', extra: 'wide', legal: false, landing: { x: 50, y: 88 } };
+        }
+
+        if (shot.type === 'leave') {
+            const stumpsExposed = shot.guard === 'leg' && lineCat !== 'off';
+            if ((lineCat === 'middle' || stumpsExposed) && lengthCat !== 'short') {
+                return { isOut: true, runs: 0, commentary: 'BOWLED! Left a straight one!' };
+            }
+            return { isOut: false, runs: 0, commentary: 'Well left through to the keeper.' };
+        }
+
+        const effectiveLength = (shot.footwork === 'advance' && lengthCat === 'good') ? 'full' : lengthCat;
+        const goodDepth =
+            (effectiveLength === 'short' && shot.footwork === 'back') ||
+            ((effectiveLength === 'full' || effectiveLength === 'yorker') && shot.footwork !== 'back') ||
+            (effectiveLength === 'good' && shot.footwork !== 'back');
+
+        const goodShotChoice =
+            (effectiveLength === 'short' && (shot.type === 'cutpull' || shot.type === 'defend')) ||
+            (effectiveLength === 'yorker' && (shot.type === 'defend' || shot.type === 'ground')) ||
+            ((effectiveLength === 'good' || effectiveLength === 'full') && ['ground', 'sweep', 'loft', 'defend'].includes(shot.type));
+
+        const landing = computeLanding360(shot);
+        const near = nearestFielder(landing.x, landing.y);
+
+        let outChance = 0.04;
+        if ((shot.type === 'loft' || shot.type === 'cutpull') && near.fielder && near.dist < 14) outChance += 0.16;
+        if (!goodDepth) outChance += 0.12;
+        if (!goodShotChoice) outChance += 0.12;
+        if (shot.type === 'loft') outChance += 0.08;
+        if (shot.type === 'defend') outChance -= 0.04;
+        if (shot.timing === 'early' || shot.timing === 'late') outChance += 0.22;
+        if (shot.timing === 'perfect') outChance -= 0.06;
+        if (bw) outChance += (bw.bowlSkill - 70) * 0.002;
+        if (state.freeHit) outChance = 0;
+
+        outChance = Math.max(0.01, Math.min(0.68, outChance));
+
+        let isOut = false;
+        let runs = 0;
+        let commentary = '';
+
+        if (Math.random() < outChance) {
+            isOut = true;
+            if (lengthCat === 'yorker' && shot.type === 'loft') commentary = 'BOWLED! Timber shattered by a yorker!';
+            else if (shot.footwork === 'advance' && delivery.variation === 'spin') commentary = 'STUMPED! Beaten in the flight!';
+            else if (near.fielder && (shot.type === 'loft' || shot.type === 'cutpull')) commentary = `CAUGHT by ${near.fielder.short}!`;
+            else commentary = 'EDGED & CAUGHT behind!';
+        } else {
+            if (shot.type === 'defend') {
+                runs = (shot.timing === 'perfect' && near.dist > 18 && Math.random() < 0.3) ? 1 : 0;
+            } else if (shot.type === 'loft') {
+                if (shot.timing === 'perfect' && goodDepth) runs = 6;
+                else if (shot.timing === 'good') runs = 4;
+                else runs = 1;
+            } else {
+                if (shot.timing === 'perfect' && goodDepth && goodShotChoice) runs = near.dist > 14 ? 4 : 2;
+                else if (shot.timing === 'perfect' || shot.timing === 'good') runs = near.dist > 16 ? 2 : 1;
+                else runs = 0;
+            }
+
+            if (runs >= 4 && near.fielder && near.dist < 11 && shot.timing !== 'perfect') {
+                runs = 2;
+                commentary = `Diving stop by ${near.fielder.short}! Saved 2 runs.`;
+            } else {
+                commentary = runs === 6 ? 'MASSIVE SIX! Clean strike over the ropes!' :
+                             runs === 4 ? 'CRACKING FOUR! Pierced the gap!' :
+                             runs === 0 ? 'Dot ball.' : `${runs} run${runs > 1 ? 's' : ''}`;
+            }
+        }
+
+        if (delivery.extra === 'noball') {
+            state.extras.noBalls += 1;
+            return {
+                runs: runs + 1,
+                isOut: false,
+                commentary: `NO BALL! +1 & FREE HIT next ball!`,
+                extra: 'noball',
+                legal: false,
+                freeHitNext: true,
+                landing,
+                nearestFielder: near.fielder,
+                nearestDist: near.dist,
+                gap: near.dist > 20
+            };
+        }
+
+        return {
+            runs,
+            isOut,
+            commentary,
+            landing,
+            nearestFielder: near.fielder,
+            nearestDist: near.dist,
+            gap: near.dist > 20,
+            legal: true,
+            extra: null
+        };
+    }
+
+    function finishFlightAndResolve(delivery, shot, precomputed = null) {
         if (state.flightAnimId) cancelAnimationFrame(state.flightAnimId);
         state.ballInFlight = false;
-        $('pitchMarker').style.opacity = '0';
+        $('ballShadow').style.opacity = '0';
 
         if (shot.type !== 'leave') {
-            playBatterShotAnimation(shot.type);
+            const fig = $('batterFigure');
+            if (fig) {
+                fig.classList.remove('anim-defend', 'anim-ground', 'anim-cutpull', 'anim-sweep', 'anim-loft');
+                void fig.offsetWidth;
+                fig.classList.add(`anim-${shot.type}`);
+                setTimeout(() => fig.classList.remove(`anim-${shot.type}`), 620);
+            }
         }
-        const _shadow = $('ballShadow');
-        if (_shadow) _shadow.style.opacity = '0';
 
-        const outcome = precomputedOutcome || resolveBall(delivery, shot);
-
-        // --- Running phase: 1-3 run hits into a gap are NOT scored yet.
-        // The batter decides, the batters cross, the fielder chases — then we score.
-        // Boundaries, wickets and dots score straight away (with a fielder chase / catch visual).
-        // Bug found in testing: wides / no-balls / byes must NOT go through the running
-        // choice — they are scored as-is (+1, ball does not count) or the running choice
-        // overwrites them and the over stops advancing. See test2 balls 9 & 14.
+        const outcome = precomputed || resolveBall(delivery, shot);
         const isRunningHit = !outcome.isOut && outcome.runs >= 1 && outcome.runs <= 3 && shot.type !== 'leave' && !outcome.extra;
+
         if (isRunningHit) {
-            // Online: keep the netcode in sync — runs are as resolved, no extra choice / re-roll.
-            // The visual crossing still happens in applyRunningOutcome().
             if (state.mode === 'online') {
                 applyRunningOutcome(delivery, shot, outcome, outcome.runs, false, outcome.runs);
-                return;
+            } else {
+                startRunningPhase(delivery, shot, outcome);
             }
-            startRunningPhase(delivery, shot, outcome);
             return;
         }
 
-        // Boundary / catch / dot: show the ball going to the fielder / boundary, then score.
-        animateBallToOutcome(outcome, shot);
-        applyOutcomeNow(delivery, shot, outcome);
+        animateBallToOutcome(outcome, shot, () => {
+            const calledRun = state.runRequested && state.mode === 'ai' && !outcome.isOut && outcome.runs === 0 && shot.type !== 'leave' && !outcome.extra;
+            state.runRequested = false;
+            if (calledRun) {
+                outcome.runs = 1;
+                startRunningPhase(delivery, shot, outcome);
+                return;
+            }
+            applyOutcomeNow(delivery, shot, outcome);
+        });
     }
 
-    function animateBallToOutcome(outcome, shot) {
-        const ball = $('ball');
-        if (!ball) return;
-        const landing = outcome.landing || computeLanding(shot, state.activeDelivery);
-        const near = outcome.nearestFielder ? { fielder: outcome.nearestFielder, dist: outcome.nearestDist } : nearestFielder(landing.x, landing.y);
-        ball.classList.add('travelling');
-        ball.style.opacity = '1';
-        ball.style.left = `${landing.x}%`;
-        ball.style.top = `${landing.y}%`;
-        ball.style.transform = `translate(-50%, -50%) scale(${outcome.runs >= 4 ? 1.1 : 0.9})`;
-        if (near.fielder) {
-            const el = document.querySelector(`.fielder[data-id="${near.fielder.id}"]`);
+    function animateBallToOutcome(outcome, shot, onDone) {
+        setCamera('broadcast');
+        const landing = outcome.landing || computeLanding360(shot);
+        const isBoundary = outcome.runs >= 4;
+        const endPt = isBoundary
+            ? { x: Math.max(4, Math.min(96, landing.x + (landing.x - 50) * 0.3)), y: Math.max(18, landing.y - 6) }
+            : landing;
+
+        if (outcome.nearestFielder) {
+            const el = document.querySelector(`.fielder[data-id="${outcome.nearestFielder.id}"]`);
             if (el) {
-                el.classList.add(outcome.isOut ? 'catching' : 'chasing');
-                // Fielder sprints a little towards the ball
-                el.style.left = `${Math.max(6, Math.min(94, (near.fielder.x + landing.x) / 2))}%`;
-                el.style.top = `${Math.max(5, Math.min(94, (near.fielder.y + landing.y) / 2))}%`;
+                el.classList.add('chasing');
+                el.style.left = `${endPt.x}%`;
+                el.style.top = `${endPt.y}%`;
                 setTimeout(() => {
-                    el.classList.remove('chasing', 'catching');
-                    el.style.left = `${near.fielder.x}%`;
-                    el.style.top = `${near.fielder.y}%`;
-                }, 1100);
+                    el.classList.remove('chasing');
+                    el.style.left = `${outcome.nearestFielder.x}%`;
+                    el.style.top = `${outcome.nearestFielder.y}%`;
+                }, 1400);
             }
         }
-        setTimeout(() => { ball.classList.remove('travelling'); ball.style.opacity = '0'; }, 1000);
+
+        animateBallPath({ x: 50, y: 82 }, endPt, isBoundary ? 1100 : 850, { arc: isBoundary ? 34 : 10, startScale: 1.15, endScale: 0.7 }, () => {
+            setTimeout(() => {
+                if (state.runRequested && state.mode === 'ai' && outcome.runs === 0 && !outcome.isOut && !outcome.extra) {
+                    if (onDone) onDone();
+                    return;
+                }
+                throwBallBackToBowler(onDone);
+            }, 550);
+        });
+    }
+
+    function startRunningPhase(delivery, shot, outcome) {
+        state.pendingRun = { delivery, shot, outcome };
+        const dist = Math.round(outcome.nearestDist || 25);
+        $('runningMsg').textContent = `Gap found (${dist}m)! Call runs:`;
+
+        if (isLocalBatting() && state.mode === 'ai') {
+            $('runningPanel').style.display = 'flex';
+            state.runTimer = setTimeout(() => chooseRuns(outcome.runs), 3500);
+        } else {
+            const aiRuns = outcome.gap ? Math.min(3, outcome.runs + 1) : 1;
+            setTimeout(() => completeRunning(aiRuns), 500);
+        }
+    }
+
+    function chooseRuns(n) {
+        if (!state.pendingRun) return;
+        $('runningPanel').style.display = 'none';
+        if (state.runTimer) { clearTimeout(state.runTimer); state.runTimer = null; }
+        completeRunning(n);
+    }
+
+    function completeRunning(attempted) {
+        const pending = state.pendingRun;
+        if (!pending) return;
+        state.pendingRun = null;
+        const { delivery, shot, outcome } = pending;
+
+        const dist = outcome.nearestDist || 25;
+        let runOutChance = dist < 14 ? 0.24 : dist < 22 ? 0.10 : 0.04;
+        if (attempted >= 2) runOutChance += 0.14;
+        if (attempted >= 3) runOutChance += 0.18;
+        const runOut = attempted > 0 && Math.random() < runOutChance;
+        const completed = attempted === 0 ? 0 : runOut ? attempted - 1 : attempted;
+
+        applyRunningOutcome(delivery, shot, outcome, attempted, runOut, completed);
+    }
+
+    function applyRunningOutcome(delivery, shot, outcome, attempted, runOut, completed) {
+        setCamera('broadcast');
+        const landing = outcome.landing || { x: 50, y: 45 };
+        animateBallPath({ x: 50, y: 82 }, landing, 850, { arc: 10, startScale: 1.15, endScale: 0.85 }, () => {
+            throwBallBackToBowler();
+        });
+
+        const bat = $('batsman'), ns = $('nonStriker');
+        if (attempted > 0 && bat && ns) {
+            let swapped = false;
+            const cross = (n) => {
+                swapped = !swapped;
+                bat.style.transform = swapped ? 'translate(-50%, 0) translateY(-290px)' : '';
+                ns.style.transform = swapped ? 'translate(-50%, 0) translateY(290px)' : '';
+                if (n < attempted) setTimeout(() => cross(n + 1), state.runCrossMs);
+                else setTimeout(() => { bat.style.transform = ''; ns.style.transform = ''; }, state.runCrossMs);
+            };
+            cross(1);
+        }
+
+        const finalOutcome = {
+            ...outcome,
+            runs: completed,
+            isOut: runOut ? true : outcome.isOut,
+            commentary: runOut ? `RUN OUT! Short of the crease!` : completed === 0 ? 'No run.' : `${completed} run${completed > 1 ? 's' : ''} completed!`
+        };
+
+        setTimeout(() => applyOutcomeNow(delivery, shot, finalOutcome, runOut), Math.max(1050, attempted * state.runCrossMs + 500));
     }
 
     function applyOutcomeNow(delivery, shot, outcome, runOut = false) {
-        // 📺 TV: big event graphic, umpire signal, crowd, camera shake, keeper dive, stumps
-        const _st = currentStriker();
         if (outcome.isOut || runOut) {
-            showBroadcastEvent('wicket','WICKET', (outcome.commentary || 'Batter departs').slice(0,60));
-            umpireSignal('out'); crowdCheer(true); shakeCamera();
-            const _stumps = document.querySelector('.stumps-bottom');
-            if (_stumps && outcome.commentary.includes('BOWLED')) { _stumps.classList.add('shattered'); setTimeout(()=>_stumps.classList.remove('shattered'), 700); }
-            showLowerThird(_st? _st.name : 'Batter', `OUT — ${outcome.commentary}`);
-            setTicker(`WICKET! ${outcome.commentary} — ${state[state.battingSide].score}/${state[state.battingSide].wickets}`);
-        } else if (outcome.runs>=6) {
-            showBroadcastEvent('six','SIX','🚀 Cleared the ropes!');
-            umpireSignal('six'); crowdCheer(true); shakeCamera();
-            if(_st) showLowerThird(_st.name, `${_st.batRuns} off ${_st.batBalls} — ${_st.fours}×4 ${_st.sixes}×6`);
-            setTicker(`SIX! ${outcome.commentary}`);
-        } else if (outcome.runs===4) {
-            showBroadcastEvent('four','FOUR','🔥 Into the gap — to the boundary!');
-            umpireSignal('four'); crowdCheer(true);
-            setTicker(`FOUR! ${outcome.commentary}`);
-        } else if (outcome.extra==='wide') { umpireSignal('wide'); setTicker('Wide ball — +1 run.'); }
-        else if (outcome.extra==='noball') { umpireSignal('wide'); setTicker('No-ball! Free hit coming up.'); }
-        else if (outcome.runs===0 && (shot.timing==='early'||shot.timing==='late')) { const _k=document.querySelector('.keeper'); if(_k){ _k.classList.add('diving'); setTimeout(()=>_k.classList.remove('diving'),600); } }
-        updateTVScorebug();
-        if (outcome.isOut || runOut) {
-            if (outcome.commentary.includes('BOWLED')) {
-                SoundFX.stumpsShatter();
-            } else if (runOut) {
-                SoundFX.stumpsShatter();
-                setTimeout(() => SoundFX.crowdRoar(false), 150);
-            } else {
-                SoundFX.batCrack(0.7);
-                setTimeout(() => SoundFX.crowdRoar(false), 150);
+            umpireSignal('out');
+            SoundFX.stumpsShatter();
+            SoundFX.crowdRoar(false);
+            showBanner('OUT!', outcome.commentary);
+            const stumps = $('batterStumps');
+            if (stumps && outcome.commentary.includes('BOWLED')) {
+                stumps.classList.add('shattered');
+                setTimeout(() => stumps.classList.remove('shattered'), 900);
             }
-        } else if (shot.type === 'leave') {
-            SoundFX.click();
-        } else if (shot.type === 'defend') {
-            SoundFX.batDefend();
-        } else if (outcome.runs >= 4) {
-            SoundFX.batCrack(1.25);
-            setTimeout(() => SoundFX.crowdRoar(true), 120);
-        } else if (outcome.runs > 0) {
-            SoundFX.batCrack(0.95);
+        } else if (outcome.runs >= 6) {
+            umpireSignal('six');
+            SoundFX.batCrack(1.3);
+            SoundFX.crowdRoar(true);
+            showBanner('SIX!', outcome.commentary);
+        } else if (outcome.runs === 4) {
+            umpireSignal('four');
+            SoundFX.batCrack(1.15);
+            SoundFX.crowdRoar(true);
+            showBanner('FOUR!', outcome.commentary);
         } else {
-            SoundFX.batDefend();
+            if (outcome.extra === 'wide' || outcome.extra === 'noball') umpireSignal('wide');
+            if (outcome.runs > 0) SoundFX.batCrack(0.95);
+            else if (shot.type !== 'leave') SoundFX.batDefend();
+            showBanner('', outcome.commentary);
         }
 
         const team = state[state.battingSide];
@@ -1138,12 +1083,11 @@
         if (isLegal) team.balls += 1;
         if (outcome.isOut || runOut) team.wickets += 1;
         team.score += outcome.runs;
-        // Free hit: this ball used it up, unless this ball itself was a no-ball
-        const wasFreeHit = state.freeHit;
         state.freeHit = !!outcome.freeHitNext;
-        // --- Player stats ---
+
         const st = currentStriker(), bw = currentBowler();
-        const batRuns = outcome.extra === 'bye' || outcome.extra === 'legbye' ? 0 : outcome.extra === 'wide' ? 0 : Math.max(0, outcome.runs - (outcome.extra === 'noball' ? 1 : 0));
+        const batRuns = (outcome.extra === 'wide') ? 0 : Math.max(0, outcome.runs - (outcome.extra === 'noball' ? 1 : 0));
+
         if (st) {
             st.batRuns += batRuns;
             if (outcome.extra !== 'wide') st.batBalls += 1;
@@ -1151,7 +1095,7 @@
             if (batRuns === 6) st.sixes += 1;
             if (outcome.isOut || runOut) {
                 st.out = true;
-                st.outHow = runOut ? 'run out' : outcome.commentary.includes('BOWLED') ? 'b' : outcome.commentary.includes('CAUGHT') || outcome.commentary.includes('EDGED') ? 'c' : 'b';
+                st.outHow = runOut ? 'run out' : outcome.commentary.includes('BOWLED') ? 'b' : 'c';
             }
         }
         if (bw) {
@@ -1159,762 +1103,341 @@
             bw.bowlRuns += outcome.runs;
             if (outcome.isOut && !runOut) bw.bowlWkts += 1;
             bw.oversBowled = Math.floor(bw.bowlBalls / 6);
-            bw.fatigue = Math.min(0.6, bw.bowlBalls * 0.018 + (bw.oversBowled * 0.08));
+            bw.fatigue = Math.min(0.6, bw.bowlBalls * 0.02);
         }
-        // Wagon wheel + Manhattan data
+
         if (outcome.landing && (outcome.runs > 0 || outcome.isOut)) {
-            state.wagonShots.push({ x: outcome.landing.x, y: outcome.landing.y, runs: batRuns, dir: shot.dir, type: shot.type });
+            state.wagonShots.push({ x: outcome.landing.x, y: outcome.landing.y, runs: batRuns });
         }
-        state.currentOverRuns = (state.currentOverRuns || 0) + outcome.runs;
-        // Strike: odd runs swap ends (including run-out completed runs)
-        if (!outcome.isOut && !runOut && outcome.runs % 2 === 1) swapStrike();
-        // Wicket: new batter in at the striker's end
+        state.currentOverRuns += outcome.runs;
+
+        if (!outcome.isOut && !runOut && outcome.runs % 2 === 1) {
+            const tmp = state.strikerIdx;
+            state.strikerIdx = state.nonStrikerIdx;
+            state.nonStrikerIdx = tmp;
+        }
         if (outcome.isOut || runOut) {
-            const nb = nextBatterIn();
-            if (!nb) { /* all out — checkMatchProgression will finish it */ }
+            if (state.nextBatterIdx < PLAYERS_PER_TEAM) {
+                state.strikerIdx = state.nextBatterIdx++;
+            }
         }
-        drawCharts();
-        updatePlayersStrip();
 
-        const teamName = state.battingSide === 'p1' ? $('p1Label').textContent : $('p2Label').textContent;
-        const logType = (outcome.isOut || runOut) ? 'wicket' : (outcome.runs >= 4 ? 'boundary' : '');
-        const timingLabel = shot.type === 'leave' ? 'BALL LEFT' : `Timing: ${shot.timing.toUpperCase()}`;
-        const summary = `[${Math.floor((team.balls - 1)/6)}.${(team.balls - 1)%6 + 1}] ${teamName}: ${outcome.commentary} (${timingLabel})`;
+        updateHud();
+        $('replayBtn').disabled = !state.replayFrames.length;
 
-        $('ballResult').textContent = outcome.commentary;
-        addLog(summary, logType);
-        updateScoreboard();
-        const rb = $('replayBtn');
-        if (rb) rb.disabled = !state.replayFrames.length;
-
-        // End of over? (legal balls only)
         if (isLegal && team.balls % 6 === 0 && team.balls > 0) {
-            state.overRuns.push(state.currentOverRuns || 0);
-            addLog(`— End of over ${team.balls / 6}: ${teamName} ${team.score}/${team.wickets} — over went for ${state.currentOverRuns || 0} runs.`, 'boundary');
+            state.overRuns.push(state.currentOverRuns);
             state.currentOverRuns = 0;
             state.lastBowlerIdx = state.currentBowlerIdx;
-            // Swap ends at the end of the over
-            swapStrike();
+            const tmp = state.strikerIdx;
+            state.strikerIdx = state.nonStrikerIdx;
+            state.nonStrikerIdx = tmp;
             updatePowerplay();
-            // Auto-pick the next available bowler (AI + solo); the human bowler can change it in the panel
-            const squad = state.inningsData ? state.inningsData.bowling : [];
-            const nextIdx = squad.findIndex((b, i) => bowlerAvailable(i));
-            if (nextIdx >= 0) { state.currentBowlerIdx = nextIdx; renderBowlerSelect(); }
-            drawCharts();
+
+            const squad = state.inningsData.bowling;
+            const nextIdx = squad.findIndex((_, i) => bowlerAvailable(i));
+            if (nextIdx >= 0) {
+                state.currentBowlerIdx = nextIdx;
+                renderBowlerDropdown();
+            }
         }
-        setTimeout(prepareNextBall, 1300);
+
+        setTimeout(prepareNextBall, 1200);
+    }
+
+    function updatePowerplay() {
+        const team = state[state.battingSide];
+        const oversDone = Math.floor((team ? team.balls : 0) / 6);
+        state.powerplay = oversDone < Math.max(1, Math.round(state.maxOvers * 0.2));
     }
 
     // ==========================================
-    // 5c. SCORECARD, WAGON WHEEL, MANHATTAN, REPLAY
+    // 7. TURN FLOW & SMART AI
+    // ==========================================
+    function isLocalBatting() {
+        if (state.mode === 'ai') return state.battingSide === 'p1';
+        return (state.role === 'host' && state.battingSide === 'p1') || (state.role === 'guest' && state.battingSide === 'p2');
+    }
+
+    function prepareNextBall() {
+        if (checkMatchProgression()) return;
+        updateHud();
+        updateVisualPositions();
+        $('timingCursor').style.left = '0%';
+        $('runningPanel').style.display = 'none';
+        setCamera(state.cameraMode || 'batter');
+
+        if (isLocalBatting()) {
+            $('battingControls').style.display = 'flex';
+            $('bowlingControls').style.display = 'none';
+            $('playShotBtn').disabled = true;
+            $('pitchMarker').style.display = 'none';
+            $('shotAimGuide').style.display = 'block';
+
+            if (state.mode === 'ai') {
+                $('statusMsg').textContent = 'Set guard (WASD) & aim shot — bowler coming in...';
+                if (state.autoBallTimer) clearTimeout(state.autoBallTimer);
+                state.autoBallTimer = setTimeout(() => {
+                    if (isLocalBatting() && !state.ballInFlight) {
+                        launchBallFlight(generateAIDelivery(), null);
+                    }
+                }, 1800);
+            }
+        } else {
+            $('battingControls').style.display = 'none';
+            $('bowlingControls').style.display = 'flex';
+            $('deliverBallBtn').disabled = false;
+            $('pitchMarker').style.display = 'block';
+            $('shotAimGuide').style.display = 'none';
+            updatePitchReticle();
+            renderBowlerDropdown();
+            $('statusMsg').textContent = 'Click/drag pitch to aim, drag fielders, then BOWL.';
+        }
+    }
+
+    function recordBatterTendency(shot) {
+        const m = state.aiMemory;
+        m.ballsFaced++;
+        m.shotTypes[shot.type] = (m.shotTypes[shot.type] || 0) + 1;
+        m.footwork[shot.footwork] = (m.footwork[shot.footwork] || 0) + 1;
+    }
+
+    function generateAIDelivery() {
+        const bw = currentBowler();
+        const baseSpeed = bw ? Math.round(110 + bw.bowlSkill * 0.34) : 128;
+        const angle = pick(['over', 'wide', 'round']);
+        const variation = pick(['seam', 'inswing', 'outswing', 'spin']);
+        let aimX = 42 + Math.floor(Math.random() * 17); // 42..58%
+        let aimY = 38 + Math.floor(Math.random() * 35); // 38..73%
+
+        if (state.aiMemory.ballsFaced >= 3 && Math.random() < 0.7) {
+            if ((state.aiMemory.shotTypes.loft || 0) >= 2) {
+                aimY = 71; // Yorker to block lofts
+                setFieldPreset('defensive');
+            }
+            if ((state.aiMemory.footwork.advance || 0) >= 2) {
+                aimY = 38; // Bouncer when advancing
+            }
+        }
+
+        return { angle, variation, aimX, aimY, speed: baseSpeed + Math.floor(Math.random() * 10) };
+    }
+
+    function generateAIShot(delivery) {
+        const lenCat = getLengthCategoryFromY(delivery.aimY);
+        const types = lenCat === 'short' ? ['cutpull', 'ground'] : lenCat === 'yorker' ? ['defend', 'ground'] : ['ground', 'loft', 'cutpull', 'sweep'];
+        const timings = state.difficulty === 'hard' ? ['perfect', 'perfect', 'good'] : state.difficulty === 'easy' ? ['good', 'early', 'late'] : ['perfect', 'good', 'good'];
+
+        // Aim toward open gap
+        const candidateAngles = [-110, -65, -25, 0, 25, 65, 110];
+        let bestAngle = 0, bestDist = -1;
+        candidateAngles.forEach(ang => {
+            const pt = computeLanding360({ angle: ang, type: 'ground', timing: 'perfect' });
+            const near = nearestFielder(pt.x, pt.y);
+            if (near.dist > bestDist) { bestDist = near.dist; bestAngle = ang; }
+        });
+
+        return {
+            guard: getLineCategoryFromX(delivery.aimX),
+            footwork: lenCat === 'short' ? 'back' : 'crease',
+            type: pick(types),
+            angle: bestAngle,
+            timing: pick(timings)
+        };
+    }
+
+    function checkMatchProgression() {
+        const current = state[state.battingSide];
+        const allOut = current.wickets >= PLAYERS_PER_TEAM - 1;
+        const oversDone = current.balls >= state.maxOvers * 6;
+
+        if (state.innings === 2 && current.score >= state.target) {
+            finishMatch();
+            return true;
+        }
+        if (allOut || oversDone) {
+            if (state.innings === 1) {
+                saveInningsScorecard();
+                state.innings = 2;
+                state.target = current.score + 1;
+                state.battingSide = state.battingSide === 'p1' ? 'p2' : 'p1';
+                SoundFX.crowdRoar(false);
+                showBanner('INNINGS BREAK', `Target: ${state.target}`);
+                startInningsData(state.battingSide);
+                setTimeout(prepareNextBall, 1800);
+                return true;
+            }
+            finishMatch();
+            return true;
+        }
+        return false;
+    }
+
+    function saveInningsScorecard() {
+        if (!state.inningsData) return;
+        state.scorecardHistory.push({
+            team: state.battingSide === 'p1' ? 'YOUR TEAM' : 'OPPONENT',
+            batting: state.inningsData.batting.map(b => ({ ...b })),
+            bowling: state.inningsData.bowling.map(b => ({ ...b })),
+            total: state[state.battingSide].score,
+            wickets: state[state.battingSide].wickets,
+            balls: state[state.battingSide].balls
+        });
+    }
+
+    function finishMatch() {
+        if (state.scorecardHistory.length < 2) saveInningsScorecard();
+        SoundFX.crowdRoar(true);
+        const s1 = state.p1.score, s2 = state.p2.score;
+        $('resultMessage').textContent = s1 > s2 ? `YOU WON BY ${s1 - s2} RUNS!` : s2 > s1 ? `OPPONENT WON BY ${PLAYERS_PER_TEAM - 1 - state.p2.wickets} WICKETS!` : 'MATCH TIED!';
+        $('finalStats').innerHTML = `
+            <div><strong>YOUR TEAM:</strong> ${state.p1.score}/${state.p1.wickets} (${Math.floor(state.p1.balls / 6)}.${state.p1.balls % 6} ov)</div>
+            <div><strong>OPPONENT:</strong> ${state.p2.score}/${state.p2.wickets} (${Math.floor(state.p2.balls / 6)}.${state.p2.balls % 6} ov)</div>
+        `;
+        $('resultScreen').classList.add('active');
+    }
+
+    // ==========================================
+    // 8. SCORECARD, WAGON WHEEL & REPLAY
     // ==========================================
     function drawCharts() {
-        // Wagon wheel
         const wc = $('wagonWheel');
-        if (wc && wc.getContext) {
+        if (wc) {
             const ctx = wc.getContext('2d');
-            if (!ctx) return;
             ctx.clearRect(0, 0, wc.width, wc.height);
-            ctx.fillStyle = '#0e2a12'; ctx.fillRect(0, 0, wc.width, wc.height);
-            // pitch
-            ctx.fillStyle = '#a1887f'; ctx.fillRect(wc.width / 2 - 14, 20, 28, 160);
-            ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.strokeRect(wc.width / 2 - 14, 20, 28, 160);
-            // shots from the batter (bottom centre) to the landing point
-            const cx = wc.width / 2, cy = 180;
+            ctx.fillStyle = '#0e3816';
+            ctx.beginPath(); ctx.arc(90, 90, 84, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.stroke();
+            ctx.fillStyle = '#bfa074'; ctx.fillRect(83, 65, 14, 50);
+
             state.wagonShots.forEach(sh => {
-                const x = (sh.x / 100) * wc.width, y = (sh.y / 100) * wc.height;
-                ctx.strokeStyle = sh.runs >= 6 ? '#ffd700' : sh.runs === 4 ? '#66bb6a' : 'rgba(255,255,255,0.85)';
-                ctx.lineWidth = sh.runs >= 4 ? 3 : 1.5;
-                ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke();
-                ctx.fillStyle = ctx.strokeStyle;
-                ctx.beginPath(); ctx.arc(x, y, sh.runs >= 4 ? 5 : 3, 0, Math.PI * 2); ctx.fill();
+                const tx = (sh.x / 100) * 180;
+                const ty = (sh.y / 100) * 180;
+                ctx.strokeStyle = sh.runs >= 6 ? '#facc15' : sh.runs === 4 ? '#22c55e' : '#ffffff';
+                ctx.lineWidth = sh.runs >= 4 ? 2.5 : 1.2;
+                ctx.beginPath(); ctx.moveTo(90, 110); ctx.lineTo(tx, ty); ctx.stroke();
             });
-            ctx.fillStyle = '#fff'; ctx.font = '11px sans-serif'; ctx.fillText('Batter', cx - 18, 198);
         }
-        // Manhattan
+
         const mc = $('manhattanChart');
-        if (mc && mc.getContext) {
+        if (mc) {
             const ctx = mc.getContext('2d');
-            if (!ctx) return;
             ctx.clearRect(0, 0, mc.width, mc.height);
-            ctx.fillStyle = '#0e2a12'; ctx.fillRect(0, 0, mc.width, mc.height);
             const overs = [...state.overRuns];
             if (state.currentOverRuns) overs.push(state.currentOverRuns);
             if (!overs.length) overs.push(0);
-            const max = Math.max(6, ...overs);
-            const bw = mc.width / Math.max(overs.length, 1);
+            const max = Math.max(8, ...overs);
+            const bw = (mc.width - 20) / overs.length;
             overs.forEach((r, i) => {
-                const h = (r / max) * (mc.height - 30);
-                ctx.fillStyle = i === overs.length - 1 ? '#ffd700' : '#43a047';
-                ctx.fillRect(i * bw + 4, mc.height - 20 - h, bw - 8, h);
+                const h = (r / max) * 130;
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(10 + i * bw + 3, 155 - h, bw - 6, h);
                 ctx.fillStyle = '#fff'; ctx.font = '10px sans-serif';
-                ctx.fillText(String(r), i * bw + bw / 2 - 3, mc.height - 24 - h);
-                ctx.fillText(`O${i + 1}`, i * bw + bw / 2 - 6, mc.height - 6);
+                ctx.fillText(String(r), 10 + i * bw + bw / 2 - 4, 150 - h);
             });
         }
     }
+
     function renderScorecard() {
+        drawCharts();
         const body = $('scorecardBody');
         if (!body) return;
-        const hist = state.scorecardHistory || [];
-        const current = state.inningsData ? {
-            team: state.battingSide === 'p1' ? $('p1Label').textContent : $('p2Label').textContent,
-            batting: state.inningsData.batting, bowling: state.inningsData.bowling,
-            total: state[state.battingSide].score, wickets: state[state.battingSide].wickets,
-            balls: state[state.battingSide].balls, extras: state.extras
-        } : null;
-        const inningsList = [...hist];
-        if (current) inningsList.push(current);
-        if (!inningsList.length) { body.innerHTML = '<p>No innings yet — start a match.</p>'; return; }
-        let html = '';
-        inningsList.forEach((inn, idx) => {
-            html += `<h4>Innings ${idx + 1} — ${inn.team}: ${inn.total}/${inn.wickets} (${Math.floor(inn.balls / 6)}.${inn.balls % 6} ov)</h4>`;
-            html += '<table><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>How out</th></tr>';
-            inn.batting.forEach(b => {
-                const _ns = currentNonStriker();
-                if (b.batBalls === 0 && !b.out && b.name !== (currentStriker() && currentStriker().name) && !(_ns && b.name === _ns.name)) return;
-                html += `<tr><td>${b.name}${idx === inningsList.length - 1 && currentStriker() && b.name === currentStriker().name ? ' *' : ''}</td><td>${b.batRuns}</td><td>${b.batBalls}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${b.out ? (b.outHow || 'out') : '<span class="not-out">not out</span>'}</td></tr>`;
+        const list = [...state.scorecardHistory];
+        if (state.inningsData && list.length < state.innings) {
+            list.push({
+                team: state.battingSide === 'p1' ? 'YOUR TEAM' : 'OPPONENT',
+                batting: state.inningsData.batting,
+                bowling: state.inningsData.bowling,
+                total: state[state.battingSide].score,
+                wickets: state[state.battingSide].wickets,
+                balls: state[state.battingSide].balls
             });
-            html += '</table>';
-            html += '<table><tr><th>Bowler</th><th>Ov</th><th>R</th><th>W</th><th>Econ</th></tr>';
-            inn.bowling.forEach(b => {
-                if (b.bowlBalls === 0) return;
-                const ov = `${Math.floor(b.bowlBalls / 6)}.${b.bowlBalls % 6}`;
-                const econ = b.bowlBalls ? (b.bowlRuns / (b.bowlBalls / 6)).toFixed(1) : '—';
-                html += `<tr><td>${b.name}</td><td>${ov}</td><td>${b.bowlRuns}</td><td>${b.bowlWkts}</td><td>${econ}</td></tr>`;
-            });
-            html += '</table>';
-            html += `<p>Extras: wd ${inn.extras.wides}, nb ${inn.extras.noBalls}, b ${inn.extras.byes}, lb ${inn.extras.legByes}</p>`;
-        });
-        body.innerHTML = html;
+        }
+        body.innerHTML = list.map((inn, idx) => `
+            <h4 style="margin:8px 0;color:var(--gold);">Innings ${idx + 1} — ${inn.team} (${inn.total}/${inn.wickets})</h4>
+            <table>
+                <tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>Status</th></tr>
+                ${inn.batting.filter(b => b.batBalls > 0 || b.out).map(b => `
+                    <tr><td>${b.name}</td><td>${b.batRuns}</td><td>${b.batBalls}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${b.out ? b.outHow : 'not out'}</td></tr>
+                `).join('')}
+            </table>
+        `).join('');
     }
+
     function replayLastBall() {
-        const _rbadge = $('tvReplayBadge'); if (_rbadge) _rbadge.style.display='block';
-        setTimeout(()=>{ if(_rbadge) _rbadge.style.display='none'; }, 3200);
-        if (state.replaying || !state.replayFrames.length) return;
-        if (state.ballInFlight) return;
+        if (state.replaying || !state.replayFrames.length || state.ballInFlight) return;
         state.replaying = true;
-        const btn = $('replayBtn');
-        if (btn) btn.disabled = true;
-        $('statusMsg').textContent = '🔁 Replay — last ball at 0.4x speed…';
+        $('replayBtn').disabled = true;
         setCamera('batter');
         const ball = $('ball');
         const frames = state.replayFrames;
         const start = performance.now();
-        const duration = frames.length * 16 * 2.5; // ~0.4x
+        const duration = frames.length * 36;
         ball.style.opacity = '1';
+
         function step(now) {
             const t = Math.min(1, (now - start) / duration);
-            const idx = Math.min(frames.length - 1, Math.floor(t * frames.length));
-            const f = frames[idx];
+            const f = frames[Math.min(frames.length - 1, Math.floor(t * frames.length))];
             if (f) {
                 ball.style.left = `${f.x}%`;
                 ball.style.top = `${f.y}%`;
-                ball.style.transform = `translate(-50%, -50%) scale(${f.scale})`;
+                ball.style.transform = `translate(-50%, -50%) translateY(${f.lift}px) scale(${f.scale})`;
             }
-            if (t < 1 && state.replaying) requestAnimationFrame(step);
+            if (t < 1) requestAnimationFrame(step);
             else {
                 state.replaying = false;
                 ball.style.opacity = '0';
-                if (btn) btn.disabled = false;
-                $('statusMsg').textContent = 'Replay finished. Ready for the next ball.';
+                $('replayBtn').disabled = false;
             }
         }
         requestAnimationFrame(step);
     }
 
     // ==========================================
-    // 5b. RUNNING BETWEEN WICKETS
+    // 9. INIT, BINDINGS & KEYBOARD
     // ==========================================
-    function hideRunningPanel() {
-        const panel = $('runningPanel');
-        if (panel) panel.style.display = 'none';
-        if (state.runTimer) { clearTimeout(state.runTimer); state.runTimer = null; }
-    }
-    function resetRunningPositions() {
-        const bat = $('batsman');
-        if (bat) { bat.classList.remove('sprinting'); bat.style.transform = ''; }
-        const ns = $('nonStriker');
-        if (ns) { ns.classList.remove('sprinting'); ns.style.transform = ''; }
-    }
-    function startRunningPhase(delivery, shot, outcome) {
-        state.pendingRun = { delivery, shot, outcome };
-        const near = outcome.nearestFielder;
-        const dist = Math.round(outcome.nearestDist || 99);
-        const msg = $('runningMsg');
-        if (msg) msg.textContent = `Ball to ${near ? near.name : 'the outfield'} — ${outcome.gap ? 'big gap!' : 'fielder is ' + dist + '% away.'} How many?`;
-        const hint = $('runningHint');
-        if (hint) {
-            hint.textContent = dist < 14
-                ? 'Fielder is close — a 2nd run risks a run-out. A 3rd is very risky.'
-                : dist < 22
-                    ? 'Fielder is mid-distance — 2 is gettable, 3 is risky.'
-                    : 'Big gap — 2 is safe, 3 is on if you are quick.';
-        }
-        // Only the local batter in solo mode chooses. AI batter auto-calls.
-        if (isLocalBatting() && state.mode === 'ai') {
-            const panel = $('runningPanel');
-            if (panel) panel.style.display = 'block';
-            $('statusMsg').textContent = '🏃 Ball in the gap! Call your runs — Run 1 / 2 / 3 or Stay.';
-            state.runTimer = setTimeout(() => chooseRuns(outcome.runs), 4000);
-        } else {
-            // AI batting: call based on the gap and the required rate
-            const aiRuns = outcome.gap ? Math.min(3, outcome.runs + 1) : (dist < 14 ? 1 : outcome.runs);
-            setTimeout(() => completeRunning(Math.max(0, Math.min(3, aiRuns))), 650);
-        }
-    }
-    function chooseRuns(n) {
-        if (!state.pendingRun) return;
-        hideRunningPanel();
-        completeRunning(n);
-    }
-    function completeRunning(attempted) {
-        const pending = state.pendingRun;
-        if (!pending) return;
-        state.pendingRun = null;
-        const { delivery, shot, outcome } = pending;
-        // Run-out risk grows with each extra run and shrinks if the fielder is far / timing was perfect.
-        const dist = outcome.nearestDist || 99;
-        let runOutChance = dist < 12 ? 0.22 : dist < 20 ? 0.12 : 0.05;
-        if (attempted >= 2) runOutChance += 0.12;
-        if (attempted >= 3) runOutChance += 0.16;
-        if (shot.timing === 'perfect') runOutChance -= 0.05;
-        runOutChance = Math.max(0.02, Math.min(0.55, runOutChance));
-        const runOut = attempted > 0 && Math.random() < runOutChance;
-        const runsCompleted = attempted === 0 ? 0 : runOut ? attempted - 1 : attempted;
-        applyRunningOutcome(delivery, shot, outcome, attempted, runOut, runsCompleted);
-    }
-    function applyRunningOutcome(delivery, shot, outcome, attempted, runOut, runsCompleted) {
-        // Visual: ball to the fielder, fielder chases, batters cross `attempted` times.
-        animateRunning(attempted, outcome, runOut);
-        const finalOutcome = {
-            ...outcome,
-            runs: runsCompleted,
-            isOut: runOut ? true : outcome.isOut,
-            commentary: attempted === 0
-                ? '✋ No run — batters stay put, ball returned to the bowler.'
-                : runOut
-                    ? `💥 RUN OUT! Went for ${attempted} and ${runsCompleted} completed — direct hit at the ${attempted % 2 === 1 ? "batter's" : "bowler's"} end!`
-                    : runsCompleted === 1
-                        ? `🏃 Quick single taken${outcome.gap ? ' — into the gap' : ''}.`
-                        : `🏃🏃 ${runsCompleted} runs taken — good running between the wickets!`
-        };
-        // Score after the running animation has had a moment to read (900ms per run, min 900ms)
-        const delay = Math.max(900, attempted * 750);
-        setTimeout(() => applyOutcomeNow(delivery, shot, finalOutcome, runOut), delay);
-    }
-    function animateRunning(attempted, outcome, runOut) {
-        const ball = $('ball');
-        const landing = outcome.landing || { x: 50, y: 45 };
-        const near = outcome.nearestFielder ? { fielder: outcome.nearestFielder, dist: outcome.nearestDist } : nearestFielder(landing.x, landing.y);
-        if (ball) {
-            ball.classList.add('travelling');
-            ball.style.opacity = '1';
-            ball.style.left = `${landing.x}%`;
-            ball.style.top = `${landing.y}%`;
-            ball.style.transform = 'translate(-50%, -50%) scale(0.9)';
-        }
-        if (near.fielder) {
-            const el = document.querySelector(`.fielder[data-id="${near.fielder.id}"]`);
-            if (el) {
-                el.classList.add('chasing');
-                el.style.left = `${landing.x}%`;
-                el.style.top = `${landing.y}%`;
-                setTimeout(() => {
-                    el.classList.remove('chasing');
-                    el.style.left = `${near.fielder.x}%`;
-                    el.style.top = `${near.fielder.y}%`;
-                }, Math.max(1100, attempted * 750));
-            }
-        }
-        if (attempted === 0) {
-            setTimeout(() => { if (ball) { ball.classList.remove('travelling'); ball.style.opacity = '0'; } }, 800);
-            return;
-        }
-        // Batters cross: striker up the pitch, non-striker down. Swap after each run.
-        const bat = $('batsman');
-        const ns = $('nonStriker');
-        if (!bat || !ns) return;
-        bat.classList.add('sprinting');
-        ns.classList.add('sprinting');
-        const batX = getComputedStyle(bat).getPropertyValue('--batter-x') || '0px';
-        let swapped = false;
-        const cross = (runNo) => {
-            swapped = !swapped;
-            if (swapped) {
-                bat.style.transform = 'translate(-50%, 0) translateX(0px) translateY(-270px)';
-                ns.style.transform = 'translate(-50%, 0) translateY(270px)';
-            } else {
-                bat.style.transform = '';
-                ns.style.transform = '';
-            }
-            if (runNo < attempted) setTimeout(() => cross(runNo + 1), 720);
-            else {
-                setTimeout(() => {
-                    bat.classList.remove('sprinting');
-                    ns.classList.remove('sprinting');
-                    // After an odd number of runs the strike has changed — reset for the next ball
-                    resetRunningPositions();
-                    if (ball) { ball.classList.remove('travelling'); ball.style.opacity = '0'; }
-                    if (runOut) SoundFX.stumpsShatter();
-                }, 750);
-            }
-        };
-        setTimeout(() => cross(1), 120);
+    function getActiveVal(groupId) {
+        const el = $(groupId)?.querySelector('.active');
+        return el ? el.dataset.val : '';
     }
 
-    // ==========================================
-    // 6. ADVANCED CREASE & ANGLE PHYSICS ENGINE
-    // ==========================================
-    function resolveBall(delivery, shot) {
-        const lengthCat = getLengthCategory(delivery.lengthVal);
-        const _bw = currentBowler();
-
-        // Wide: +1, does not count as a legal ball, batter cannot be out (except run-out, not modelled here)
-        if (delivery.extra === 'wide') {
-            state.extras.wides += 1;
-            const landingW = computeLanding(shot, delivery);
-            const nearW = nearestFielder(landingW.x, landingW.y);
-            return { isOut: false, runs: 1, commentary: 'Wide ball! +1 run — that one does not count as a legal delivery.', extra: 'wide', legal: false, landing: landingW, nearestFielder: nearW.fielder, nearestDist: nearW.dist, gap: nearW.dist > 28 };
-        }
-
-        // Handle leaving the ball
-        if (shot.type === 'leave') {
-            const stumpsExposed = shot.guard === 'leg' && delivery.line !== 'off';
-            if ((delivery.line === 'middle' || stumpsExposed) && lengthCat !== 'short') {
-                return { isOut: true, runs: 0, commentary: '💥 BOWLED! Exposed the stumps and left a straight one!' };
-            }
-            return { isOut: false, runs: 0, commentary: '👀 Well left! Safe carry through to the keeper.' };
-        }
-
-        let runs = 0;
-        let isOut = false;
-        let commentary = '';
-
-        // 1. Crease Depth vs Pitch Length
-        // Advancing down pitch converts 'good' length into a driveable half-volley, but is risky vs yorkers/bouncers!
-        const effectiveLength = (shot.footwork === 'advance' && lengthCat === 'good') ? 'full' : lengthCat;
-
-        const goodDepth =
-            (effectiveLength === 'short' && shot.footwork === 'back') ||
-            ((effectiveLength === 'full' || effectiveLength === 'yorker') && (shot.footwork === 'crease' || shot.footwork === 'advance')) ||
-            (effectiveLength === 'good' && shot.footwork !== 'back');
-
-        // 2. Lateral Crease Guard vs Delivery Line & Angle
-        // Stepping across to 'off' covers outswing/wide balls; backing to 'leg' frees arms for off-side drives!
-        const coveredLine =
-            (delivery.line === 'off' && (shot.guard === 'off' || shot.guard === 'middle')) ||
-            (delivery.line === 'leg' && (shot.guard === 'leg' || shot.guard === 'middle')) ||
-            (delivery.line === 'middle');
-
-        const freedArmsBonus = (shot.guard === 'leg' && delivery.line === 'off' && shot.dir === 'off');
-        const exposedStumpsRisk = (shot.guard === 'leg' && delivery.line === 'middle');
-
-        // 3. Shot Selection vs Length
-        const goodShotChoice =
-            (effectiveLength === 'short' && (shot.type === 'cutpull' || shot.type === 'defend')) ||
-            (effectiveLength === 'yorker' && (shot.type === 'defend' || shot.type === 'ground')) ||
-            ((effectiveLength === 'good' || effectiveLength === 'full') && ['ground', 'sweep', 'loft', 'defend'].includes(shot.type));
-
-        const lineMatch =
-            (delivery.line === 'off' && shot.dir === 'off') ||
-            (delivery.line === 'leg' && (shot.dir === 'leg' || shot.type === 'sweep')) ||
-            (delivery.line === 'middle' && shot.dir === 'straight');
-
-        // Field effect on the catch chance: a fielder sitting under a lofted / mishit ball.
-        const _landingEarly = computeLanding(shot, delivery);
-        const _nearEarly = nearestFielder(_landingEarly.x, _landingEarly.y);
-        let outChance = 0.05;
-        if ((shot.type === 'loft' || shot.type === 'cutpull') && _nearEarly.fielder && _nearEarly.dist < 20) outChance += 0.12;
-        if (shot.timing !== 'perfect' && _nearEarly.fielder && _nearEarly.dist < 12) outChance += 0.06;
-        if (!goodDepth) outChance += 0.13;
-        if (!coveredLine) outChance += 0.11;
-        if (exposedStumpsRisk) outChance += 0.12;
-        if (!goodShotChoice) outChance += 0.13;
-        if (shot.type === 'loft') outChance += 0.09;
-        if (shot.type === 'defend') outChance -= 0.05;
-        if (delivery.angle === 'round' && delivery.variation === 'inswing') outChance += 0.05;
-        if (shot.timing === 'early' || shot.timing === 'late') outChance += 0.21;
-        if (shot.timing === 'perfect') outChance -= 0.06;
-
-        if (_bw) outChance += (_bw.bowlSkill - 70) * 0.002;
-        // Free hit: batter cannot be out (except run-out) on this ball
-        if (state.freeHit && !shot.type.includes('run')) outChance = Math.min(outChance, 0.03);
-        outChance = Math.max(0.02, Math.min(0.72, outChance));
-
-        // 🌦️ CLIMATE: overcast/humidity = more swing (harder to hit swing balls), green pitch = seam, dry = spin.
-        // Dew = wet ball: spin grips less, catches are dropped more, lofted shots carry less risk of being held.
-        const _c = state.conditions;
-        if (_c) {
-            if ((delivery.variation==='inswing'||delivery.variation==='outswing')) outChance += _c.swingBoost;
-            if (delivery.variation==='spin') outChance += _c.spinBoost - (_c.dew/100)*0.08;
-            if (delivery.variation==='seam' && _c.pitch.includes('Green')) outChance += 0.05;
-            if (_c.dew>=60 && (shot.type==='loft'||shot.type==='cutpull')) outChance -= 0.05; // wet ball slips through hands
-            if (_c.windAlong===-1 && shot.type==='loft') outChance += 0.02;
-        }
-        if (Math.random() < outChance) {
-            isOut = true;
-            if (exposedStumpsRisk && (shot.timing === 'early' || shot.timing === 'late')) {
-                commentary = '💥 BOWLED! Backed away to leg and missed—leg stump flattened!';
-            } else if (shot.footwork === 'advance' && delivery.variation === 'spin') {
-                commentary = '🧤 STUMPED! Charged down the track and beaten by sharp turn!';
-            } else if (lengthCat === 'yorker' && shot.type === 'loft') {
-                commentary = '💥 BOWLED! Tried to slog a toe-crushing yorker!';
-            } else if (shot.type === 'loft') {
-                commentary = '🙌 CAUGHT IN THE DEEP! Mistimed the lofted hit!';
-            } else {
-                commentary = '🧤 EDGED & CAUGHT! Angled delivery took the outside edge!';
-            }
-        } else {
-            if (shot.type === 'defend') {
-                runs = (shot.timing === 'perfect' && lineMatch && Math.random() < 0.35) ? 1 : 0;
-            } else if (shot.type === 'loft') {
-                if (shot.timing === 'perfect' && goodDepth) {
-                    runs = (lineMatch || freedArmsBonus || goodShotChoice) ? 6 : 4;
-                } else if (shot.timing === 'good') {
-                    runs = goodDepth ? 4 : 2;
-                } else {
-                    runs = 1;
-                }
-            } else {
-                if (shot.timing === 'perfect' && goodDepth && goodShotChoice) {
-                    runs = (lineMatch || freedArmsBonus) ? 4 : 3;
-                } else if (shot.timing === 'perfect' || (shot.timing === 'good' && (lineMatch || freedArmsBonus))) {
-                    runs = Math.random() < 0.5 ? 4 : 2;
-                } else if (shot.timing === 'good') {
-                    runs = 1;
-                } else {
-                    runs = 0;
-                }
-            }
-
-            commentary = runs === 6 ? '🚀 MASSIVE SIX! Used the crease brilliantly and cleared the ropes!' :
-                         runs === 4 ? '🔥 CRACKING FOUR! Placed into the gap with precision!' :
-                         runs === 0 ? 'Dot ball. Tight line and disciplined fielding.' :
-                         `🏏 Smart placement — ${runs} run${runs > 1 ? 's' : ''} taken.`;
-        }
-
-        // Field effect on runs: a fielder in the deep cuts a boundary down, a gap lets it through.
-        const landing = computeLanding(shot, delivery);
-        const near = nearestFielder(landing.x, landing.y);
-        let finalRuns = runs;
-        let finalCommentary = commentary;
-        if (!isOut) {
-            if (finalRuns >= 4 && near.fielder && near.dist < 13 && shot.timing !== 'perfect') {
-                finalRuns = 2;
-                finalCommentary = `✂️ Cut off in the deep by ${near.fielder.name}! Saved two — 2 runs.`;
-            } else if (finalRuns >= 2 && near.fielder && near.dist < 10) {
-                finalRuns = 1;
-                finalCommentary = `🧤 Fielded quickly by ${near.fielder.name} — only 1 run.`;
-            } else if (isOut === false && finalRuns > 0 && near.fielder && near.dist > 28) {
-                finalCommentary = commentary + ` Gap found — ${near.fielder.name} had no chance.`;
-            }
-        } else if (near.fielder && (shot.type === 'loft' || shot.type === 'cutpull')) {
-            finalCommentary = `🙌 CAUGHT by ${near.fielder.name}! Mistimed and straight to the fielder.`;
-        }
-        // Power: big hitters turn 4s into 6s, weak hitters turn 6s into 4s
-        const _st = currentStriker();
-        if (!isOut && _st) {
-            if (finalRuns === 6 && _st.power < 60) { finalRuns = 4; finalCommentary = finalCommentary.replace('SIX', 'FOUR'); }
-            else if (finalRuns === 4 && _st.power >= 88 && Math.random() < 0.25) { finalRuns = 6; finalCommentary = '🚀 MASSIVE SIX! Cleared the ropes with power to spare!'; }
-        }
-        // 🌬️ WIND on big hits: tailwind carries a 4 over the rope, headwind holds a 6 back to 4.
-        if (!isOut && _c) {
-            if (finalRuns===4 && _c.windAlong===1 && shot.timing==='perfect' && Math.random()<0.3) { finalRuns=6; finalCommentary='🚀 SIX! Tailwind carried it clean over the ropes!'; }
-            else if (finalRuns===6 && _c.windAlong===-1 && Math.random()<0.35) { finalRuns=4; finalCommentary='🔥 FOUR! Headwind held that one up — just short of the rope.'; }
-            if (_c.dew>=70 && finalRuns===0 && (shot.timing==='early'||shot.timing==='late') && Math.random()<0.1) { /* wet-ball fumble handled by bye logic below */ }
-        }
-        // Bye / leg-bye: beaten, keeper fumbles — 1 run, counts as a legal ball, no bat runs
-        if (!isOut && finalRuns === 0 && (shot.timing === 'early' || shot.timing === 'late') && Math.random() < 0.16 && delivery.extra !== 'noball') {
-            const isLeg = delivery.line === 'leg';
-            if (isLeg) state.extras.legByes += 1; else state.extras.byes += 1;
-            return { runs: 1, isOut: false, commentary: isLeg ? 'Leg-bye! Beaten, 1 run sneaked.' : 'Bye! Beaten, keeper fumbles — 1 run.', extra: isLeg ? 'legbye' : 'bye', legal: true, landing, nearestFielder: near.fielder, nearestDist: near.dist, gap: near.dist > 28 };
-        }
-        // No-ball: +1 extra, does not count as a legal ball, out is overturned, next ball is a free hit
-        if (delivery.extra === 'noball') {
-            state.extras.noBalls += 1;
-            const wasOut = isOut;
-            const nbRuns = finalRuns + 1;
-            const nbCommentary = wasOut
-                ? `No-ball! +1 — ${finalCommentary} is overturned, batter survives. FREE HIT next ball!`
-                : `${finalCommentary} (no-ball +1 — FREE HIT next ball!)`;
-            return { runs: nbRuns, isOut: false, commentary: nbCommentary, extra: 'noball', legal: false, freeHitNext: true, landing, nearestFielder: near.fielder, nearestDist: near.dist, gap: near.dist > 28 };
-        }
-        return { runs: finalRuns, isOut, commentary: finalCommentary, landing, nearestFielder: near.fielder, nearestDist: near.dist, gap: near.dist > 28, legal: true, extra: null };
-    }
-
-    // ==========================================
-    // 7. TURN FLOW & AI LOGIC
-    // ==========================================
-    function isLocalBatting() {
-        if (state.mode === 'ai') return state.battingSide === 'p1';
-        return (state.role === 'host' && state.battingSide === 'p1') ||
-               (state.role === 'guest' && state.battingSide === 'p2');
-    }
-
-    function prepareNextBall() {
-        if (checkMatchProgression()) return;
-        updateScoreboard();
+    function selectButtonByVal(groupId, val) {
+        const g = $(groupId);
+        if (!g) return;
+        g.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === val));
         updateVisualPositions();
-        $('timingCursor').style.left = '0%';
-
-        resetPlayers();
-        setCamera(state.cameraMode || 'batter');
-        hideRunningPanel();
-        resetRunningPositions();
-        if (isLocalBatting()) {
-            $('battingControls').style.display = 'block';
-            $('bowlingControls').style.display = 'none';
-            $('playShotBtn').disabled = true;
-
-            if (state.mode === 'ai') {
-                $('readyToBatBtn').style.display = 'inline-block';
-                $('readyToBatBtn').disabled = false;
-                $('statusMsg').textContent = '👀 Set your guard (A/D), depth (W/S) & click "Ready for Next Ball"!';
-            } else {
-                $('readyToBatBtn').style.display = 'none';
-                $('statusMsg').textContent = '⏳ Waiting for online bowler to deliver...';
-            }
-        } else {
-            $('battingControls').style.display = 'none';
-            $('bowlingControls').style.display = 'block';
-            $('deliverBallBtn').disabled = false;
-            renderBowlerSelect();
-            updatePlayersStrip();
-            // AI bowling to the user: pick its best bowler for this striker
-            if (state.mode === 'ai') aiChooseBowler();
-            $('statusMsg').textContent = '🎳 Set crease angle, pitch length & pace, then bowl!';
-        }
-        updatePlayersStrip();
-        drawCharts();
-        const _s2=currentStriker(), _b2=currentBowler();
-        if(_s2 && _b2) showLowerThird(`${_s2.name}  •  ${_s2.batRuns} (${_s2.batBalls})`, `Bowler: ${_b2.name} — ${_b2.bowlType} • ${state.conditions? state.conditions.weather+', wind '+windDesc(state.conditions):''}`);
-        updateTVScorebug();
     }
 
-    $('readyToBatBtn').addEventListener('click', () => {
-        if (!isLocalBatting() || state.mode !== 'ai') return;
-        SoundFX.click();
-        $('readyToBatBtn').disabled = true;
-        $('statusMsg').textContent = '🎳 Bowler running in...';
-        setTimeout(() => {
-            const aiDelivery = generateAIDelivery();
-            launchBallFlight(aiDelivery, null);
-        }, 550);
-    });
-
-    $('deliverBallBtn').addEventListener('click', () => {
-        if (isLocalBatting() || state.ballInFlight) return;
-        SoundFX.click();
-        $('deliverBallBtn').disabled = true;
-
-        const delivery = {
-            angle: getActiveVal('bowlAngleGroup'),
-            line: getActiveVal('bowlLineGroup'),
-            variation: getActiveVal('bowlVarGroup'),
-            lengthVal: Number($('bowlLengthSlider').value),
-            speed: Number($('bowlSpeedSlider').value)
-        };
-        if (!isLocalBatting()) recordBowlerTendency(delivery);
-
-        if (state.mode === 'ai') {
-            const aiShot = generateAIShot(delivery);
-            launchBallFlight(delivery, aiShot);
-        } else {
-            state.activeDelivery = delivery;
-            sendNet({ type: 'BOWL_DELIVERY', delivery });
-            launchBallFlight(delivery, null);
-        }
-    });
-
-    function recordBatterTendency(shot) {
-        const m = state.aiMemory;
-        m.ballsFaced += 1;
-        m.shotTypes[shot.type] = (m.shotTypes[shot.type] || 0) + 1;
-        m.dirs[shot.dir] = (m.dirs[shot.dir] || 0) + 1;
-        m.guards[shot.guard] = (m.guards[shot.guard] || 0) + 1;
-        m.footwork[shot.footwork] = (m.footwork[shot.footwork] || 0) + 1;
-        if (shot.type === 'loft' || shot.type === 'ground') m.boundaries += 1;
-    }
-    function recordBowlerTendency(delivery) {
-        const m = state.aiMemory;
-        m.bowlLines[delivery.line] = (m.bowlLines[delivery.line] || 0) + 1;
-        m.bowlLengths[getLengthCategory(delivery.lengthVal)] = (m.bowlLengths[getLengthCategory(delivery.lengthVal)] || 0) + 1;
-        m.bowlVars[delivery.variation] = (m.bowlVars[delivery.variation] || 0) + 1;
-    }
-    function mostCommon(obj) {
-        let best = null, bestN = 0;
-        Object.entries(obj).forEach(([k, v]) => { if (v > bestN) { bestN = v; best = k; } });
-        return best;
-    }
-    function aiUsesMemory() {
-        // Easy mostly ignores what it has learned, Hard almost always uses it
-        const p = state.difficulty === 'hard' ? 0.9 : state.difficulty === 'easy' ? 0.25 : 0.55;
-        return Math.random() < p;
-    }
-    function generateAIDelivery() {
-        const m = state.aiMemory;
-        const bw = currentBowler();
-        // Base speed from the current AI bowler's skill, not a flat difficulty number
-        const baseSpeed = bw ? Math.round(108 + bw.bowlSkill * 0.35) : (state.difficulty === 'hard' ? 140 : state.difficulty === 'easy' ? 102 : 122);
-        let angle = ['over', 'wide', 'round'][Math.floor(Math.random() * 3)];
-        let line = ['off', 'middle', 'leg'][Math.floor(Math.random() * 3)];
-        let variation = ['seam', 'inswing', 'outswing', 'spin'][Math.floor(Math.random() * 4)];
-        let lengthVal = 20 + Math.floor(Math.random() * 70);
-        if (aiUsesMemory() && m.ballsFaced >= 4) {
-            const favDir = mostCommon(m.dirs);
-            const favShot = mostCommon(m.shotTypes);
-            const favFoot = mostCommon(m.footwork);
-            // User loves driving through off? Bowl leg, round the wicket, set the field there.
-            if (favDir === 'off') { line = 'leg'; angle = 'round'; variation = 'inswing'; }
-            // User lofts a lot? Yorkers + slower balls, defensive field.
-            if (favShot === 'loft') { lengthVal = 78 + Math.floor(Math.random() * 12); variation = 'seam'; setFieldPreset('defensive'); }
-            // User advances down the pitch? Bowl short / bouncer and spin.
-            if (favFoot === 'advance') { lengthVal = 18 + Math.floor(Math.random() * 15); variation = Math.random() < 0.5 ? 'spin' : 'seam'; }
-            // User is timing everything perfectly? Vary length hard and use a slower ball.
-            const st = currentStriker();
-            if (st && st.timing >= 85) { lengthVal = [22, 58, 82][Math.floor(Math.random() * 3)]; }
-            // User struggles vs spin? Bowl more spin.
-            if (favShot === 'defend') { variation = 'spin'; lengthVal = 45 + Math.floor(Math.random() * 20); }
-        }
-        // Fatigue: AI bowler also tires
-        const speed = bw ? Math.max(85, Math.round(baseSpeed - bw.fatigue * 10 + Math.floor(Math.random() * 10))) : baseSpeed + Math.floor(Math.random() * 14);
-        return { angle, line, variation, lengthVal, speed };
-    }
-    function generateAIShot(delivery) {
-        const chasing = state[state.battingSide];
-        const ballsLeft = Math.max(1, state.maxOvers * 6 - chasing.balls);
-        const reqRate = state.target ? (state.target - chasing.score) / ballsLeft : 1.2;
-        const lenCat = getLengthCategory(delivery.lengthVal);
-        const m = state.aiMemory;
-        // Pick the gap: the direction whose nearest fielder is furthest away
-        const gapDir = (() => {
-            const dirs = { off: { x: 20, y: 40 }, straight: { x: 50, y: 20 }, leg: { x: 80, y: 40 } };
-            let best = 'straight', bestD = -1;
-            Object.entries(dirs).forEach(([d, pt]) => {
-                const near = nearestFielder(pt.x, pt.y);
-                if (near.dist > bestD) { bestD = near.dist; best = d; }
+    function bindGroup(groupId, cb) {
+        const g = $(groupId);
+        if (!g) return;
+        g.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                SoundFX.click();
+                g.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                updateVisualPositions();
+                if (cb) cb(btn.dataset);
             });
-            return best;
-        })();
-        let types, footwork;
-        if (state.target && reqRate > 1.6) types = ['loft', 'cutpull', 'ground'];
-        else if (chasing.wickets >= 7) types = ['ground', 'defend', 'sweep'];
-        else types = ['ground', 'cutpull', 'sweep', 'defend'];
-        // Read the human bowler: short a lot -> pull, yorker a lot -> defend, off line -> drive off
-        if (aiUsesMemory()) {
-            const favLen = mostCommon(m.bowlLengths);
-            const favLine = mostCommon(m.bowlLines);
-            if (favLen === 'short') types = ['cutpull', 'ground'];
-            if (favLen === 'yorker') types = ['defend', 'ground'];
-            if (favLine === 'off') types = ['ground', 'cutpull'];
-        }
-        footwork = lenCat === 'short' ? 'back' : (lenCat === 'good' && Math.random() < 0.3 ? 'advance' : 'crease');
-        const timings = state.difficulty === 'hard'
-            ? ['perfect', 'perfect', 'good']
-            : state.difficulty === 'easy'
-                ? ['good', 'early', 'late']
-                : ['perfect', 'good', 'good'];
-        // Faster balls are harder to time perfectly
-        const timingPool = delivery.speed >= 145 ? timings.map(t => t === 'perfect' && Math.random() < 0.4 ? 'good' : t) : timings;
-        return {
-            guard: delivery.line === 'middle' ? 'middle' : delivery.line,
-            footwork,
-            type: types[Math.floor(Math.random() * types.length)],
-            dir: gapDir, // was delivery.line (and 'middle' is not a valid direction) — audit fix
-            timing: timingPool[Math.floor(Math.random() * timingPool.length)]
-        };
-    }
-    function aiChooseBowler() {
-        // Pick the best available bowler for the current striker, not the last bowler
-        const squad = state.inningsData ? state.inningsData.bowling : [];
-        const st = currentStriker();
-        const candidates = squad.map((b, i) => ({ b, i })).filter(({ i }) => bowlerAvailable(i));
-        if (!candidates.length) return;
-        candidates.sort((a, b) => {
-            // Spin vs a big hitter, pace vs a weak timer — small matchup bonus
-            const aBonus = (st && st.power >= 85 && a.b.bowlType === 'spin') ? 6 : 0;
-            const bBonus = (st && st.power >= 85 && b.b.bowlType === 'spin') ? 6 : 0;
-            return (b.b.bowlSkill + bBonus - b.b.fatigue * 20) - (a.b.bowlSkill + aBonus - a.b.fatigue * 20);
         });
-        state.currentBowlerIdx = candidates[0].i;
-        renderBowlerSelect();
-        updatePlayersStrip();
     }
 
-    function checkMatchProgression() {
-        const current = state[state.battingSide];
-        const maxBalls = state.maxOvers * 6;
-        const allOut = current.wickets >= PLAYERS_PER_TEAM - 1;
-        const oversDone = current.balls >= maxBalls;
-
-        if (state.innings === 2 && current.score >= state.target) {
-            finishMatch();
-            return true;
-        }
-
-        if (allOut || oversDone) {
-            if (state.innings === 1) {
-                // Save this innings for the scorecard before starting the next one
-                state.scorecardHistory = state.scorecardHistory || [];
-                state.scorecardHistory.push({
-                    team: state.battingSide === 'p1' ? $('p1Label').textContent : $('p2Label').textContent,
-                    batting: state.inningsData.batting.map(b => ({ ...b })),
-                    bowling: state.inningsData.bowling.map(b => ({ ...b })),
-                    total: current.score, wickets: current.wickets, balls: current.balls, extras: { ...state.extras }
-                });
-                state.innings = 2;
-                if (state.conditions) { state.conditions.dew = Math.min(95, state.conditions.dew + 18 + Math.floor(Math.random()*12)); renderConditions(); setTicker(`2nd innings — dew is now ${dewLabel(state.conditions.dew)} (${state.conditions.dew}%). Bowlers will find the wet ball hard to grip, spinners especially.`); }
-                state.target = current.score + 1;
-                state.battingSide = state.battingSide === 'p1' ? 'p2' : 'p1';
-                SoundFX.crowdRoar(false);
-                addLog(`=== INNINGS BREAK! Target set: ${state.target} runs ===`, 'boundary');
-                $('ballResult').textContent = `Innings Break! Target: ${state.target}`;
-                startInningsData(state.battingSide);
-                updateScoreboard();
-                setTimeout(prepareNextBall, 1600);
-                return true;
-            } else {
-                finishMatch();
-                return true;
-            }
-        }
-        return false;
+    function startInningsData(battingSide) {
+        const bowlingSide = battingSide === 'p1' ? 'p2' : 'p1';
+        state.inningsData = {
+            batting: state._squads[battingSide],
+            bowling: state._squads[bowlingSide]
+        };
+        state.strikerIdx = 0; state.nonStrikerIdx = 1; state.nextBatterIdx = 2;
+        state.currentBowlerIdx = 0; state.lastBowlerIdx = -1;
+        state.overRuns = []; state.currentOverRuns = 0; state.wagonShots = [];
+        state.freeHit = false;
+        updatePowerplay();
+        setFieldPreset('balanced');
+        renderBowlerDropdown();
+        updateHud();
     }
 
-    function finishMatch() {
-        // Save the 2nd innings for the scorecard
-        if (state.inningsData && (state.scorecardHistory || []).length < 2) {
-            state.scorecardHistory = state.scorecardHistory || [];
-            state.scorecardHistory.push({
-                team: state.battingSide === 'p1' ? $('p1Label').textContent : $('p2Label').textContent,
-                batting: state.inningsData.batting.map(b => ({ ...b })),
-                bowling: state.inningsData.bowling.map(b => ({ ...b })),
-                total: state[state.battingSide].score, wickets: state[state.battingSide].wickets, balls: state[state.battingSide].balls, extras: { ...state.extras }
-            });
-        }
-        SoundFX.crowdRoar(true);
-        const s1 = state.p1.score;
-        const s2 = state.p2.score;
-        const n1 = $('p1Label').textContent;
-        const n2 = $('p2Label').textContent;
-
-        let msg = '';
-        if (s1 > s2) msg = `🏆 ${n1} WON by ${s1 - s2} runs!`;
-        else if (s2 > s1) msg = `🏆 ${n2} WON by ${PLAYERS_PER_TEAM - 1 - state.p2.wickets} wickets!`;
-        else msg = `🤝 MATCH TIED!`;
-
-        $('resultMessage').textContent = msg;
-        $('finalStats').innerHTML = `
-            <div><strong>${n1}:</strong> ${state.p1.score}/${state.p1.wickets} (${formatOvers(state.p1.balls)})</div>
-            <div><strong>${n2}:</strong> ${state.p2.score}/${state.p2.wickets} (${formatOvers(state.p2.balls)})</div>
-        `;
-        showScreen('resultScreen');
-    }
-
-    // ==========================================
-    // 8. MATCH INIT & PEERJS ONLINE MULTIPLAYER
-    // ==========================================
     function initMatch(role = 'host') {
         state.role = role;
         state.innings = 1;
@@ -1924,108 +1447,158 @@
         state.p2 = { score: 0, wickets: 0, balls: 0 };
         state._squads = freshSquads();
         state.scorecardHistory = [];
-        state.currentOverRuns = 0;
-        state.aiMemory = { shotTypes: {}, dirs: {}, guards: {}, footwork: {}, bowlLines: {}, bowlLengths: {}, bowlVars: {}, boundaries: 0, ballsFaced: 0 };
-        clearAllTimers();
 
         if (!state.conditions) generateConditions();
-        renderConditions();
-        buildCrowd();
-        setTicker(`Welcome to ${state.conditions.venue} — ${state.conditions.weather}, ${state.conditions.tempC}°C, wind ${windDesc(state.conditions)}, dew ${dewLabel(state.conditions.dew)}. ${conditionsSummary(state.conditions)}`);
-        $('gameLog').innerHTML = '';
-        if (!state.field.length) state.field = cloneField(state.fieldPreset || 'balanced');
-        renderFielders();
-        hideRunningPanel();
-        resetRunningPositions();
-        $('formatBadge').textContent = `${state.maxOvers} OVERS • ${state.mode === 'ai' ? 'VS AI' : '2P ONLINE'}`;
-        $('p1Label').textContent = state.mode === 'ai' ? 'YOUR TEAM' : (role === 'host' ? 'YOU (HOST)' : 'HOST (P1)');
-        $('p2Label').textContent = state.mode === 'ai' ? `AI (${state.difficulty.toUpperCase()})` : (role === 'guest' ? 'YOU (GUEST)' : 'GUEST (P2)');
-        $('connectionBadge').style.display = state.mode === 'online' ? 'inline-block' : 'none';
+        $('startScreen').classList.remove('active');
+        $('resultScreen').classList.remove('active');
 
-        showScreen('gameScreen');
-        addLog(`Match Started: ${state.maxOvers} Overs per side.`);
-        // Online: skip the toss to keep both sides in sync — host bats first.
         if (state.mode === 'online') {
-            state.tossDone = true;
             startInningsData('p1');
             prepareNextBall();
-            return;
-        }
-        // Solo: toss first
-        state.tossDone = false;
-        const tp = $('tossPanel');
-        if (tp) tp.style.display = 'block';
-        $('tossMsg').textContent = 'Heads or tails? Winner chooses to bat or bowl.';
-        $('tossChoiceGroup').style.display = 'none';
-        $('tossCallGroup').style.display = 'flex';
-        updatePlayersStrip();
-    }
-    function doToss(call) {
-        const result = Math.random() < 0.5 ? 'heads' : 'tails';
-        const won = call === result;
-        $('tossMsg').textContent = `It is ${result}! You ${won ? 'won' : 'lost'} the toss.`;
-        if (won) {
-            $('tossCallGroup').style.display = 'none';
-            $('tossChoiceGroup').style.display = 'flex';
         } else {
-            // AI wins: it bats first 70% of the time
-            const aiBats = Math.random() < 0.7;
-            $('tossMsg').textContent += aiBats ? ' AI chooses to bat first.' : ' AI chooses to bowl first — you bat.';
-            setTimeout(() => { if ($('gameScreen').classList.contains('active')) finishToss(aiBats ? 'p2' : 'p1'); }, 900);
+            $('tossPanel').style.display = 'block';
+            $('tossCallGroup').style.display = 'flex';
+            $('tossChoiceGroup').style.display = 'none';
+            $('tossMsg').textContent = 'Call Heads or Tails';
         }
-    }
-    function finishToss(battingSide) {
-        state.tossDone = true;
-        state.battingSide = battingSide;
-        const tp = $('tossPanel');
-        if (tp) tp.style.display = 'none';
-        addLog(`Toss: ${battingSide === 'p1' ? $('p1Label').textContent : $('p2Label').textContent} bats first.`);
-        startInningsData(battingSide);
-        prepareNextBall();
     }
 
-    $('startSoloBtn').addEventListener('click', () => {
-        SoundFX.click();
-        initMatch('host');
+    bindGroup('oversSelect', d => state.maxOvers = Number(d.overs));
+    bindGroup('difficultySelect', d => state.difficulty = d.diff);
+    bindGroup('modeSelect', d => {
+        state.mode = d.mode;
+        $('aiSetupPanel').style.display = d.mode === 'ai' ? 'block' : 'none';
+        $('onlineSetupPanel').style.display = d.mode === 'online' ? 'block' : 'none';
+    });
+    bindGroup('batterGuardGroup');
+    bindGroup('footworkGroup');
+    bindGroup('shotTypeGroup');
+    bindGroup('bowlAngleGroup');
+    bindGroup('bowlVarGroup');
+    bindGroup('fieldPresetGroup', d => setFieldPreset(d.val));
+
+    $('bowlSpeedSlider').addEventListener('input', e => $('paceVal').textContent = e.target.value);
+    $('bowlerSelectDropdown').addEventListener('change', e => {
+        state.currentBowlerIdx = Number(e.target.value);
+        updateHud();
     });
 
+    $('deliverBallBtn').addEventListener('click', () => {
+        if (isLocalBatting() || state.ballInFlight) return;
+        SoundFX.click();
+        $('deliverBallBtn').disabled = true;
+        const delivery = {
+            angle: getActiveVal('bowlAngleGroup'),
+            variation: getActiveVal('bowlVarGroup'),
+            aimX: state.aimX,
+            aimY: state.aimY,
+            speed: Number($('bowlSpeedSlider').value)
+        };
+        if (state.mode === 'ai') {
+            launchBallFlight(delivery, generateAIShot(delivery));
+        } else {
+            state.activeDelivery = delivery;
+            sendNet({ type: 'BOWL_DELIVERY', delivery });
+            launchBallFlight(delivery, null);
+        }
+    });
+
+    $('playShotBtn').addEventListener('click', triggerBatterSwing);
+    $('runNowBtn').addEventListener('click', () => {
+        if (state.pendingRun) { $('runningPanel').style.display = 'flex'; return; }
+        state.runRequested = true;
+        $('runNowBtn').disabled = true;
+        $('statusMsg').textContent = 'Run called!';
+    });
+
+    document.querySelectorAll('#runningPanel button').forEach(btn => {
+        btn.addEventListener('click', () => chooseRuns(Number(btn.dataset.runs)));
+    });
+
+    document.querySelectorAll('.hud-btn[data-cam]').forEach(btn => {
+        btn.addEventListener('click', () => setCamera(btn.dataset.cam));
+    });
+
+    $('rerollConditionsBtn').addEventListener('click', () => { SoundFX.click(); generateConditions(); });
+    $('startSoloBtn').addEventListener('click', () => { SoundFX.click(); initMatch('host'); });
     $('restartBtn').addEventListener('click', () => {
         SoundFX.click();
-        clearAllTimers();
-        const tp = $('tossPanel'); if (tp) tp.style.display = 'none';
-        const sm = $('scorecardModal'); if (sm) sm.style.display = 'none';
-        if (state.peer) { state.peer.destroy(); state.peer = null; }
-        showScreen('startScreen');
+        $('resultScreen').classList.remove('active');
+        $('startScreen').classList.add('active');
     });
-    // Toss, scorecard and replay buttons
+
     document.querySelectorAll('#tossCallGroup button').forEach(btn => {
-        btn.addEventListener('click', () => { SoundFX.click(); doToss(btn.dataset.val); });
-    });
-    document.querySelectorAll('#tossChoiceGroup button').forEach(btn => {
         btn.addEventListener('click', () => {
-            SoundFX.click();
-            finishToss(btn.dataset.val === 'bat' ? 'p1' : 'p2');
+            const won = btn.dataset.val === (Math.random() < 0.5 ? 'heads' : 'tails');
+            if (won) {
+                $('tossMsg').textContent = 'You won the toss! Choose:';
+                $('tossCallGroup').style.display = 'none';
+                $('tossChoiceGroup').style.display = 'flex';
+            } else {
+                const aiBats = Math.random() < 0.65;
+                $('tossMsg').textContent = aiBats ? 'AI won & elected to BAT.' : 'AI won & elected to BOWL.';
+                setTimeout(() => {
+                    $('tossPanel').style.display = 'none';
+                    state.battingSide = aiBats ? 'p2' : 'p1';
+                    startInningsData(state.battingSide);
+                    prepareNextBall();
+                }, 900);
+            }
         });
     });
+
+    document.querySelectorAll('#tossChoiceGroup button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            $('tossPanel').style.display = 'none';
+            state.battingSide = btn.dataset.val === 'bat' ? 'p1' : 'p2';
+            startInningsData(state.battingSide);
+            prepareNextBall();
+        });
+    });
+
     $('scorecardBtn').addEventListener('click', () => {
-        SoundFX.click();
         renderScorecard();
         $('scorecardModal').style.display = 'flex';
     });
-    $('scorecardCloseBtn').addEventListener('click', () => {
-        SoundFX.click();
-        $('scorecardModal').style.display = 'none';
+    $('scorecardCloseBtn').addEventListener('click', () => $('scorecardModal').style.display = 'none');
+    $('replayBtn').addEventListener('click', replayLastBall);
+    $('soundToggleBtn').addEventListener('click', () => {
+        const m = SoundFX.toggleMute();
+        $('soundToggleBtn').textContent = m ? '🔇' : '🔊';
     });
-    $('scorecardModal').addEventListener('click', (e) => {
-        if (e.target === $('scorecardModal')) $('scorecardModal').style.display = 'none';
+
+    // Keyboard Controls
+    document.addEventListener('keydown', (e) => {
+        if ($('startScreen').classList.contains('active')) return;
+        const k = e.key.toLowerCase();
+
+        if (isLocalBatting()) {
+            if (k === 'a') selectButtonByVal('batterGuardGroup', getActiveVal('batterGuardGroup') === 'leg' ? 'middle' : 'off');
+            if (k === 'd') selectButtonByVal('batterGuardGroup', getActiveVal('batterGuardGroup') === 'off' ? 'middle' : 'leg');
+            if (k === 'w') selectButtonByVal('footworkGroup', getActiveVal('footworkGroup') === 'back' ? 'crease' : 'advance');
+            if (k === 's') selectButtonByVal('footworkGroup', getActiveVal('footworkGroup') === 'advance' ? 'crease' : 'back');
+
+            const shots = { '1': 'defend', '2': 'ground', '3': 'cutpull', '4': 'sweep', '5': 'loft' };
+            if (shots[e.key]) selectButtonByVal('shotTypeGroup', shots[e.key]);
+
+            if (e.key === 'ArrowLeft') { state.shotAngle = Math.max(-135, state.shotAngle - 20); updateShotAimGuide(); }
+            if (e.key === 'ArrowRight') { state.shotAngle = Math.min(135, state.shotAngle + 20); updateShotAimGuide(); }
+            if (e.key === 'ArrowUp') { state.shotAngle = 0; updateShotAimGuide(); }
+
+            if (e.code === 'Space' && state.ballInFlight && !state.shotTaken) {
+                e.preventDefault();
+                triggerBatterSwing();
+            }
+            if (k === 'r' && (state.ballInFlight || state.shotTaken)) {
+                state.runRequested = true;
+                $('runNowBtn').disabled = true;
+            }
+        }
     });
-    $('replayBtn').addEventListener('click', () => { SoundFX.click(); replayLastBall(); });
 
-    function sendNet(payload) {
-        if (state.conn && state.conn.open) state.conn.send(payload);
-    }
-
-    function setupConnectionHandlers(conn, isHost) {
+    // PeerJS Online Multiplayer
+    function sendNet(payload) { if (state.conn && state.conn.open) state.conn.send(payload); }
+    function setupConnection(conn, isHost) {
         state.conn = conn;
         conn.on('open', () => {
             if (isHost) {
@@ -2033,65 +1606,34 @@
                 initMatch('host');
             }
         });
-
         conn.on('data', (data) => {
-            if (!data || typeof data !== 'object') return;
-
-            if (data.type === 'START_MATCH' && !isHost) {
-                state.maxOvers = Number(data.maxOvers) || 5;
-                initMatch('guest');
-            }
-
-            if (data.type === 'BOWL_DELIVERY' && isLocalBatting()) {
-                launchBallFlight(data.delivery, null);
-            }
-
-            if (data.type === 'BATTER_SHOT' && isHost && !isLocalBatting() && state.activeDelivery) {
+            if (data.type === 'START_MATCH' && !isHost) { state.maxOvers = data.maxOvers; initMatch('guest'); }
+            if (data.type === 'BOWL_DELIVERY' && isLocalBatting()) launchBallFlight(data.delivery, null);
+            if (data.type === 'BATTER_SHOT' && isHost) {
                 const outcome = resolveBall(state.activeDelivery, data.shot);
                 sendNet({ type: 'BALL_RESULT', delivery: state.activeDelivery, shot: data.shot, outcome });
                 finishFlightAndResolve(state.activeDelivery, data.shot, outcome);
             }
-
-            if (data.type === 'BALL_RESULT' && !isHost) {
-                finishFlightAndResolve(data.delivery, data.shot, data.outcome);
-            }
-        });
-
-        conn.on('close', () => {
-            $('statusMsg').textContent = '⚠️ Opponent disconnected from the match.';
-            addLog('Opponent disconnected.', 'wicket');
-            showScreen('startScreen');
+            if (data.type === 'BALL_RESULT' && !isHost) finishFlightAndResolve(data.delivery, data.shot, data.outcome);
         });
     }
 
     $('createRoomBtn').addEventListener('click', () => {
-        SoundFX.click();
-        if (typeof Peer === 'undefined') {
-            $('lobbyStatus').textContent = 'PeerJS failed to load. Check internet connection.';
-            return;
-        }
-        $('lobbyStatus').textContent = 'Creating online room...';
-        const roomId = 'CRICKET-' + Math.random().toString(36).substring(2, 7).toUpperCase();
-        state.peer = new Peer(roomId);
-
-        state.peer.on('open', (id) => {
-            $('lobbyStatus').textContent = `Room Ready! Share this code with Player 2: ${id}`;
-        });
-
-        state.peer.on('connection', (conn) => {
-            setupConnectionHandlers(conn, true);
-        });
+        if (typeof Peer === 'undefined') return;
+        const code = 'CRIC-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+        state.peer = new Peer(code);
+        state.peer.on('open', id => $('lobbyStatus').textContent = `Room Code: ${id}`);
+        state.peer.on('connection', conn => setupConnection(conn, true));
     });
 
     $('joinRoomBtn').addEventListener('click', () => {
-        SoundFX.click();
         const code = $('joinRoomInput').value.trim().toUpperCase();
-        if (!code) return;
-        $('lobbyStatus').textContent = `Connecting to ${code}...`;
+        if (!code || typeof Peer === 'undefined') return;
         state.peer = new Peer();
-        state.peer.on('open', () => {
-            const conn = state.peer.connect(code);
-            setupConnectionHandlers(conn, false);
-        });
+        state.peer.on('open', () => setupConnection(state.peer.connect(code), false));
     });
+
+    // Boot
+    generateConditions();
+    bindPitchAiming();
 })();
