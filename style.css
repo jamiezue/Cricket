@@ -384,10 +384,21 @@ html, body {
 }
 
 /* Running exchange: batters glide the full pitch (~1.15s per cross) with striding legs */
-.batsman-end.running-exchange, .non-striker.running-exchange { transition: transform 1.12s linear !important; }
-.sprinting .p-leg.l1 { animation: runStride 0.28s infinite alternate; }
-.sprinting .p-leg.l2 { animation: runStride 0.28s infinite alternate-reverse; }
-@keyframes runStride { from { transform: rotate(38deg); } to { transform: rotate(-38deg); } }
+/* ✅ Natural running — smoother timing */
+.batsman-end.running-exchange, 
+.non-striker.running-exchange { 
+  transition: transform 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important; 
+}
+.sprinting .p-leg.l1 { 
+  animation: runStride 0.35s infinite alternate; 
+}
+.sprinting .p-leg.l2 { 
+  animation: runStride 0.35s infinite alternate-reverse; 
+}
+@keyframes runStride { 
+  from { transform: rotate(45deg) translateY(-2px); } 
+  to { transform: rotate(-45deg) translateY(2px); } 
+}
 
 /* Bat-ball impact flash on the timing halo */
 .timing-halo.impact { animation: impactFlash 0.35s ease-out; border-color: rgba(255,255,255,0.95); }
