@@ -102,6 +102,10 @@ html, body {
 .ground-container.cam-batter .camera-stage { transform: scale(1.08) translateY(-2%); transform-origin: 50% 82%; }
 .ground-container.cam-bowler .camera-stage { transform: scale(1.45) translateY(20%); transform-origin: 50% 22%; }
 .ground-container.cam-broadcast .camera-stage { transform: scale(0.94) translateY(0%); transform-origin: 50% 52%; }
+/* Behind-the-bowler view: the bowler is at the bottom, so zoom to the bottom; */
+/* 'batter' cam in that view zooms to the far (top) end instead. */
+.ground-container.pov-bowler.cam-bowler .camera-stage { transform: scale(1.45) translateY(-20%); transform-origin: 50% 82%; }
+.ground-container.pov-bowler.cam-batter .camera-stage { transform: scale(1.45) translateY(20%); transform-origin: 50% 22%; }
 
 /* Outfield Markings */
 .outfield-turf {
@@ -194,7 +198,7 @@ html, body {
     background: linear-gradient(180deg, #fef08a, #eab308);
     border-radius: 2px;
 }
-.stumps-top { top: 24vh; }
+.stumps-top { top: 27vh; }
 .stumps-top span { height: 18px; width: 3px; }
 .stumps-bottom { bottom: 13.5vh; gap: 6px; }
 .stumps-bottom span { height: 38px; width: 6px; }
@@ -223,9 +227,9 @@ html, body {
 
 /* Bowler */
 .bowler-end {
-    position: absolute; top: 25vh; left: 50%; z-index: 7;
+    position: absolute; top: 20vh; left: 50%; z-index: 7;
     transform: translate(-50%, 0) translateX(var(--bowler-x, 0px));
-    transition: transform 0.3s ease, top 1.1s linear;
+    transition: transform 0.3s ease, top 1.1s linear, bottom 1.1s linear;
 }
 .bowler-figure { width: 44px; height: 76px; }
 .bowler-figure .p-head { width: 18px; height: 18px; }
@@ -293,7 +297,7 @@ html, body {
 @keyframes swingLft { 45% { transform: rotate(-110deg); } 100% { transform: rotate(-75deg); } }
 
 /* Non-Striker & Umpire & Keeper */
-.non-striker { position: absolute; top: 27vh; left: 57%; z-index: 7; transition: transform 1.1s linear; }
+.non-striker { position: absolute; top: 20.5vh; left: 58.5%; z-index: 7; transition: transform 1.1s linear; }
 .runner-figure { width: 32px; height: 54px; }
 .runner-figure .p-head { width: 14px; height: 14px; background: #1e293b; }
 .runner-figure .p-torso { top: 13px; width: 22px; height: 22px; background: #f8fafc; }
@@ -302,7 +306,7 @@ html, body {
 .runner-figure .l1 { left: 2px; }
 .runner-figure .l2 { right: 2px; }
 
-.umpire { position: absolute; top: 22vh; left: 54%; z-index: 6; transform: translateX(-50%); }
+.umpire { position: absolute; top: 20.5vh; left: 55%; z-index: 6; transform: translateX(-50%); }
 .u-head { width: 14px; height: 14px; border-radius: 50%; background: #e2a776; margin: 0 auto; }
 .u-coat { position: relative; width: 22px; height: 26px; background: #fff; border-radius: 5px; margin: 1px auto 0; }
 .u-arm { position: absolute; top: 2px; width: 5px; height: 20px; background: #fff; transform-origin: top center; transition: transform 0.3s ease; }
@@ -324,7 +328,7 @@ html, body {
     position: absolute; transform: translate(-50%, -50%);
     width: 28px; height: 38px;
     pointer-events: auto; cursor: grab; touch-action: none;
-    transition: left 0.45s cubic-bezier(0.22, 1, 0.36, 1), top 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: left 0.45s cubic-bezier(0.22, 1, 0.36, 1), top 0.45s cubic-bezier(0.22, 1, 0.36, 1), transform 0.3s ease;
 }
 .fielder.dragging { transition: none; cursor: grabbing; transform: translate(-50%, -50%) scale(1.25); z-index: 20; }
 .fielder-head { display: block; width: 12px; height: 12px; border-radius: 50%; background: #e2a776; margin: 0 auto; }
@@ -336,8 +340,49 @@ html, body {
 }
 .fielder.far { transform: translate(-50%, -50%) scale(0.76); }
 .fielder.near { transform: translate(-50%, -50%) scale(1.12); }
+.fielder.catching { transform: translate(-50%, -50%) translateY(-12px) scale(1.18); z-index: 21; }
+.fielder.catching .fielder-body { background: #f59e0b; }
 .fielder.chasing .fielder-body { animation: sprintPulse 0.25s infinite alternate; }
 @keyframes sprintPulse { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
+
+/* Running exchange: batters glide the full pitch (~1.15s per cross) with striding legs */
+.batsman-end.running-exchange, .non-striker.running-exchange { transition: transform 1.12s linear !important; }
+.sprinting .p-leg.l1 { animation: runStride 0.28s infinite alternate; }
+.sprinting .p-leg.l2 { animation: runStride 0.28s infinite alternate-reverse; }
+@keyframes runStride { from { transform: rotate(38deg); } to { transform: rotate(-38deg); } }
+
+/* Bat-ball impact flash on the timing halo */
+.timing-halo.impact { animation: impactFlash 0.35s ease-out; border-color: rgba(255,255,255,0.95); }
+@keyframes impactFlash { 0% { transform: translateX(-50%) scale(1); box-shadow: 0 0 8px rgba(255,255,255,0.4); } 40% { transform: translateX(-50%) scale(1.35); box-shadow: 0 0 28px rgba(255,255,255,0.95); } 100% { transform: translateX(-50%) scale(1); box-shadow: 0 0 16px rgba(34,197,94,0.25); } }
+
+/* Keeper dives for an edge / stumping */
+.keeper.diving { animation: keeperDive 0.6s ease-out; }
+@keyframes keeperDive { 30% { transform: translateX(-50%) translateY(-10px) rotate(-14deg); } 100% { transform: translateX(-50%) translateY(0) rotate(0); } }
+
+/* =========================================
+   BEHIND-THE-BOWLER POV (when the user bowls)
+   Near end = bottom of screen, far end = top.
+   ========================================= */
+.ground-container.pov-bowler .bowler-end { top: auto; bottom: 16vh; transform: translate(-50%, 0) translateX(var(--bowler-x, 0px)) scale(1.75); transform-origin: bottom center; }
+.ground-container.pov-bowler .batsman-end { bottom: auto; top: 20vh; }
+.ground-container.pov-bowler .non-striker { top: auto; bottom: 21vh; left: 43%; }
+.ground-container.pov-bowler .non-striker .runner-figure { transform: scale(1.5); transform-origin: bottom center; }
+.ground-container.pov-bowler .keeper { bottom: auto; top: 19vh; transform: scale(0.6); transform-origin: top center; }
+.ground-container.pov-bowler .umpire { top: auto; bottom: 20vh; left: 46%; }
+/* Stumps swap ends (near stumps big, far stumps small) */
+.ground-container.pov-bowler .stumps-top { top: auto; bottom: 13.5vh; gap: 6px; }
+.ground-container.pov-bowler .stumps-top span { height: 38px; width: 6px; }
+.ground-container.pov-bowler .stumps-bottom { bottom: auto; top: 24vh; gap: 4px; }
+.ground-container.pov-bowler .stumps-bottom span { height: 18px; width: 3px; }
+/* Crease lines swap ends too (bowler's crease is now the near/bottom one) */
+.ground-container.pov-bowler .bowler-crease { top: 88%; width: 92%; }
+.ground-container.pov-bowler .batter-crease { top: 8%; width: 34%; }
+/* After an odd number of runs the batters stay crossed: the ends stay swapped */
+.ground-container.ends-swapped .batsman-end { bottom: auto; top: 20.5vh; left: 58.5%; }
+.ground-container.ends-swapped .non-striker { top: auto; bottom: 15vh; left: 50%; }
+.ground-container.pov-bowler.ends-swapped .batsman-end { top: auto; bottom: 21vh; left: 43%; }
+.ground-container.pov-bowler.ends-swapped .batsman-end .runner-figure { transform: scale(1.5); transform-origin: bottom center; }
+.ground-container.pov-bowler.ends-swapped .non-striker { bottom: auto; top: 20vh; left: 50%; }
 
 /* Cricket Ball & Separated Ground Shadow */
 .ball {
