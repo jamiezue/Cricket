@@ -949,15 +949,34 @@
     }
 
     function computeLanding360(shot) {
-        // Convert shotAngle (-135..+135 deg) & shot power into ground (x%, y%)
-        const rad = (shot.angle * Math.PI) / 180;
-        const dist = shot.type === 'loft' ? 46 :
-                     shot.type === 'defend' ? 10 :
-                     shot.timing === 'perfect' ? 38 :
-                     shot.timing === 'good' ? 28 : 18;
-        const x = 50 + Math.sin(rad) * dist;
-        const y = 82 - Math.cos(rad) * dist * 1.15;
-        return { x: Math.max(6, Math.min(94, x)), y: Math.max(20, Math.min(88, y)) };
+      const rad = (shot.angle * Math.PI) / 180;
+      // ✅ More realistic distance based on TIMING + SHOT TYPE
+      let baseDist;
+      if (shot.type === 'loft') {
+        baseDist = shot.timing === 'perfect' ? 58 : shot.timing === 'good' ? 42 : 25;
+      } else if (shot.type === 'defend') {
+        baseDist = 6 + (shot.timing === 'perfect' ? 4 : 0);
+      } else if (shot.type === 'ground') {
+        baseDist = shot.timing === 'perfect' ? 45 : shot.timing === 'good' ? 32 : 18;
+      } else if (shot.type === 'cutpull') {
+        baseDist = shot.timing === 'perfect' ? 40 : shot.timing === 'good' ? 28 : 15;
+      } else if (shot.type === 'sweep') {
+        baseDist = shot.timing === 'perfect' ? 30 : shot.timing === 'good' ? 20 : 12;
+      } else {
+        baseDist = shot.timing === 'perfect' ? 38 : 22;
+      }
+      
+      // ✅ Apply power bonus on perfect timing
+      const powerBonus = shot.timing === 'perfect' ? 1.15 : shot.timing === 'good' ? 1.05 : 1;
+      const dist = baseDist * powerBonus;
+      
+      // ✅ Proper parabolic trajectory (ball goes OUT then comes DOWN)
+      const x = 50 + Math.sin(rad) * dist;
+      const y = 82 - Math.cos(rad) * dist * 1.05;
+      return { 
+        x: Math.max(6, Math.min(94, x)), 
+        y: Math.max(18, Math.min(88, y)) 
+      };
     }
 
     function resolveBall(delivery, shot) {
