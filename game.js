@@ -1285,36 +1285,60 @@
         // (~1.15s each), legs striding, crossing mid-pitch. After an odd
         // number of runs they stay crossed: the ends swap and the bat figure
         // moves to the striker's end, ready for the next ball.
+        // ✅ NATURAL RUNNING — realistic speed, cross at mid-pitch, proper stride
         const bat = strikerWrap(), ns = otherWrap();
         if (attempted > 0 && bat && ns) {
-            const batFig = bat.querySelector('.player'), nsFig = ns.querySelector('.player');
-            const batDelta = state.povBowler ? 51 : -58; // vh: striker's end -> bowler's end
-            const nsDelta = state.povBowler ? -51 : 51;
-            bat.classList.add('running-exchange'); ns.classList.add('running-exchange');
-            if (batFig) batFig.classList.add('sprinting');
-            if (nsFig) nsFig.classList.add('sprinting');
-            let swapped = false;
-            const cross = (n) => {
-                swapped = !swapped;
-                bat.style.transform = swapped ? `translate(-50%, 0) translateY(${batDelta}vh)` : 'translate(-50%, 0) translateY(0)';
-                ns.style.transform = swapped ? `translate(-50%, 0) translateY(${nsDelta}vh)` : 'translate(-50%, 0) translateY(0)';
-                if (n < attempted) setTimeout(() => cross(n + 1), state.runCrossMs);
-                else setTimeout(() => {
-                    bat.classList.remove('running-exchange'); ns.classList.remove('running-exchange');
-                    if (batFig) batFig.classList.remove('sprinting');
-                    if (nsFig) nsFig.classList.remove('sprinting');
-                    if (attempted % 2 === 1) {
-                        state.endsSwapped = !state.endsSwapped;
-                        const pitch = $('pitch');
-                        if (pitch) pitch.classList.toggle('ends-swapped', state.endsSwapped);
-                        placeFigures();
-                    }
-                    bat.style.transform = ''; ns.style.transform = '';
-                    updateVisualPositions();
-                }, state.runCrossMs);
-            };
-            cross(1);
+          const batFig = bat.querySelector('.player'), nsFig = ns.querySelector('.player');
+          
+          // Distance = full pitch length in vh units
+          const pitchLengthVh = 56;
+          const batDelta = state.povBowler ? pitchLengthVh : -pitchLengthVh;
+          const nsDelta = state.povBowler ? -pitchLengthVh : pitchLengthVh;
+          const runTimePerCross = 900; // ✅ Slightly slower = more realistic
+          
+          bat.classList.add('running-exchange'); 
+          ns.classList.add('running-exchange');
+          if (batFig) batFig.classList.add('sprinting');
+          if (nsFig) nsFig.classList.add('sprinting');
+          
+          let crossesLeft = attempted;
+          const doCross = () => {
+            const isCrossed = (attempted - crossesLeft) % 2 === 1;
+            // ✅ Swap positions smoothly — they CROSS each other in the middle
+            bat.style.transform = isCrossed 
+              ? `translate(-50%, 0) translateY(${batDelta}vh)` 
+              : 'translate(-50%, 0) translateY(0)';
+            ns.style.transform = isCrossed 
+              ? `translate(-50%, 0) translateY(${nsDelta}vh)` 
+              : 'translate(-50%, 0) translateY(0)';
+            
+            crossesLeft--;
+            if (crossesLeft > 0) {
+              setTimeout(doCross, runTimePerCross);
+            } else {
+              // ✅ Finished running — cleanup
+              setTimeout(() => {
+                bat.classList.remove('running-exchange'); 
+                ns.classList.remove('running-exchange');
+                if (batFig) batFig.classList.remove('sprinting');
+                if (nsFig) nsFig.classList.remove('sprinting');
+                // ✅ Update striker/non-striker swap
+                if (attempted % 2 === 1) {
+                  state.endsSwapped = !state.endsSwapped;
+                  const pitch = $('pitch');
+                  if (pitch) pitch.classList.toggle('ends-swapped', state.endsSwapped);
+                  placeFigures();
+                }
+                bat.style.transform = ''; 
+                ns.style.transform = '';
+                updateVisualPositions();
+              }, runTimePerCross);
+            }
+          };
+          doCross();
         }
+    
+
 
         const finalOutcome = {
             ...outcome,
