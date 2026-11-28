@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CRICKET PRO — Full-Screen Broadcast Edition</title>
+    <title>CRICKET PRO — Voxel Edition</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -13,9 +13,9 @@
     <!-- FULL-SCREEN LOBBY OVERLAY -->
     <div id="startScreen" class="overlay-screen active">
         <div class="glass-modal">
-            <div class="pill-badge">PRO BROADCAST ENGINE</div>
+            <div class="pill-badge">VOXEL STADIUM ENGINE</div>
             <h1>CRICKET CHAMPIONSHIP</h1>
-            <p class="subtitle">Full-screen tactical cricket. Total control over field, seam, swing, footwork &amp; 360° strokeplay.</p>
+            <p class="subtitle">Full-pitch view, blocky voxel players, real-time fielding, catches, boundaries &amp; LBW.</p>
 
             <div class="setup-row">
                 <div class="setup-col">
@@ -77,7 +77,7 @@
                 <span class="target-tag" id="targetBadge" style="display:none;">TARGET --</span>
                 <span class="alert-tag freehit" id="freeHitBadge" style="display:none;">FREE HIT</span>
                 <span class="alert-tag pp" id="powerplayBadge" style="display:none;">P1</span>
-                <span class="alert-tag pp" id="povBadge" style="display:none;">BEHIND BOWLER</span>
+                <span class="alert-tag pp" id="povBadge" style="display:none;">BOWLER END</span>
             </div>
 
             <div class="batter-bowler-pill">
@@ -89,9 +89,9 @@
             </div>
 
             <div class="hud-actions">
-                <button type="button" class="hud-btn active" data-cam="batter" title="Batter Camera">🏏</button>
-                <button type="button" class="hud-btn" data-cam="bowler" title="Bowler Camera">⚾</button>
-                <button type="button" class="hud-btn" data-cam="broadcast" title="Full Ground Camera">🏟️</button>
+                <button type="button" class="hud-btn active" data-cam="batter" title="Batter End">🏏</button>
+                <button type="button" class="hud-btn" data-cam="bowler" title="Bowler End">⚾</button>
+                <button type="button" class="hud-btn" data-cam="broadcast" title="Full Ground">🏟️</button>
                 <button type="button" id="replayBtn" class="hud-btn" disabled title="Replay Last Ball">🔁</button>
                 <button type="button" id="scorecardBtn" class="hud-btn" title="Scorecard & Wagon Wheel">📋</button>
                 <button type="button" id="soundToggleBtn" class="hud-btn" title="Toggle Sound">🔊</button>
@@ -112,8 +112,8 @@
             </div>
         </div>
 
-        <!-- 3D PERSPECTIVE CRICKET GROUND (FULL SCREEN) -->
-        <main class="ground-container cam-batter" id="pitch">
+        <!-- FULL-PITCH CRICKET GROUND -->
+        <main class="ground-container" id="pitch">
             <div class="sky-horizon" id="stadiumSky">
                 <div class="floodlight fl-l"></div>
                 <div class="floodlight fl-r"></div>
@@ -122,32 +122,26 @@
             </div>
 
             <div class="camera-stage" id="cameraStage">
-                <!-- Outfield Grass & 30-Yard Inner Circle & Boundary Rope -->
                 <div class="outfield-turf">
                     <div class="boundary-rope"></div>
                     <div class="inner-circle"></div>
                 </div>
 
-                <!-- 22-Yard Pitch Strip -->
                 <div class="pitch-strip" id="pitchStrip">
                     <div class="crease-line bowler-crease"></div>
                     <div class="crease-line batter-crease"></div>
                     <div class="popping-crease-box top"></div>
                     <div class="popping-crease-box bottom"></div>
-          
                 </div>
 
-                <!-- Interactive Pitch Aim Reticle (Used when Bowling) -->
-                <div class="pitch-marker" id="pitchMarker" title="Drag on pitch to aim delivery">
+                <div class="pitch-marker" id="pitchMarker" title="Click or drag on pitch to aim">
                     <span class="marker-ring"></span>
                 </div>
 
-                <!-- 360° Shot Direction Guide Arrow (Used when Batting) -->
                 <div class="shot-aim-guide" id="shotAimGuide">
                     <div class="aim-line"></div>
                 </div>
 
-                <!-- Stumps & Flying Bails -->
                 <div class="stumps stumps-top">
                     <span></span><span></span><span></span>
                     <i class="bail b1"></i><i class="bail b2"></i>
@@ -157,7 +151,6 @@
                     <i class="bail b1"></i><i class="bail b2"></i>
                 </div>
 
-                <!-- Umpire -->
                 <div class="umpire" id="umpire">
                     <div class="u-head"></div>
                     <div class="u-coat">
@@ -167,35 +160,32 @@
                     <div class="u-legs"></div>
                 </div>
 
-                <!-- Bowler -->
                 <div class="bowler-end" id="bowlerEnd">
                     <div class="player bowler-figure" id="bowlerFigure">
                         <div class="p-shadow"></div>
                         <div class="p-legs"><div class="p-leg l1"></div><div class="p-leg l2"></div></div>
                         <div class="p-torso">
                             <div class="p-arm arm-other"></div>
-                            <div class="p-arm arm-bowl"><span class="ball-in-hand"></span></div>
+                            <div class="p-arm arm-bowl"></div>
                         </div>
                         <div class="p-head"></div>
                     </div>
                 </div>
 
-                <!-- Non-Striker -->
                 <div class="non-striker" id="nonStriker">
                     <div class="player runner-figure" id="nonStrikerFigure">
                         <div class="p-shadow"></div>
                         <div class="p-legs"><div class="p-leg l1"></div><div class="p-leg l2"></div></div>
                         <div class="p-torso"></div>
-                        <div class="p-head helmet"></div>
+                        <div class="p-head"></div>
                     </div>
                 </div>
 
-                <!-- Striker (Batter) -->
                 <div class="batsman-end" id="batsman">
                     <div class="timing-halo" id="timingHalo"></div>
                     <div class="player batter-figure" id="batterFigure">
                         <div class="p-shadow"></div>
-                        <div class="p-legs"><div class="p-leg l1 pad"></div><div class="p-leg l2 pad"></div></div>
+                        <div class="p-legs"><div class="p-leg l1"></div><div class="p-leg l2"></div></div>
                         <div class="p-torso">
                             <span class="jersey-num">7</span>
                             <div class="swing-group" id="swingGroup">
@@ -203,36 +193,33 @@
                                 <div class="willow-bat"></div>
                             </div>
                         </div>
-                        <div class="p-head helmet"></div>
+                        <div class="p-head"></div>
                     </div>
                 </div>
 
-                <!-- Wicketkeeper -->
                 <div class="keeper" id="keeper">
                     <div class="k-head"></div>
                     <div class="k-body"></div>
                 </div>
 
-                <!-- 9 Outfielders (Draggable anywhere on ground) -->
                 <div class="fielders" id="fielders"></div>
 
-                <!-- Ball & Ground Shadow (Separated for realistic bounce & loft height) -->
+                <!-- Single Ball & Ground Shadow -->
                 <div class="ball-shadow" id="ballShadow"></div>
                 <div class="ball" id="ball"></div>
             </div>
 
-            <!-- CENTER CALLOUT BANNER (FOUR / SIX / WICKET / COMMENTARY) -->
+            <!-- CENTER CALLOUT BANNER -->
             <div class="broadcast-banner" id="broadcastBanner">
                 <div class="banner-big" id="bannerBig"></div>
                 <div class="banner-sub" id="ballResult">Match Ready</div>
             </div>
         </main>
 
-        <!-- BOTTOM DOCKED TACTICAL CONTROLS (MINIMAL & TRANSLUCENT) -->
+        <!-- BOTTOM DOCKED CONTROLS -->
         <footer class="hud-bottom">
             <div class="status-whisper" id="statusMsg">Get ready...</div>
 
-            <!-- RUNNING BETWEEN WICKETS QUICK BAR -->
             <div class="dock-panel running-dock" id="runningPanel" style="display:none;">
                 <span id="runningMsg">Ball in gap!</span>
                 <div class="dock-btns">
@@ -243,7 +230,6 @@
                 </div>
             </div>
 
-            <!-- BATTING CONTROL DOCK -->
             <div class="dock-panel" id="battingControls" style="display:none;">
                 <div class="dock-group">
                     <span class="dock-label">CREASE (WASD)</span>
@@ -285,7 +271,6 @@
                 </div>
             </div>
 
-            <!-- BOWLING & FIELDING CONTROL DOCK -->
             <div class="dock-panel" id="bowlingControls" style="display:none;">
                 <div class="dock-group">
                     <span class="dock-label">ANGLE &amp; MOVEMENT</span>
