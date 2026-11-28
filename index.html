@@ -15,7 +15,7 @@
         <div class="glass-modal">
             <div class="pill-badge">VOXEL STADIUM ENGINE</div>
             <h1>CRICKET CHAMPIONSHIP</h1>
-            <p class="subtitle">Full-pitch view, blocky voxel players, real-time fielding, catches, boundaries &amp; LBW.</p>
+            <p class="subtitle">Real-time bowling, fielding &amp; throwing — catches, run-outs, boundaries &amp; LBW.</p>
 
             <div class="setup-row">
                 <div class="setup-col">
@@ -32,6 +32,14 @@
                         <button type="button" class="seg-btn active" data-mode="ai">Vs AI</button>
                         <button type="button" class="seg-btn" data-mode="online">2P Online</button>
                     </div>
+                </div>
+            </div>
+
+            <div class="setup-col" style="margin-bottom: 16px;">
+                <label>BALL SPEED</label>
+                <div class="seg-group" id="timeSelect">
+                    <button type="button" class="seg-btn active" data-ts="1">Real-time</button>
+                    <button type="button" class="seg-btn" data-ts="1.7">Relaxed (x1.7)</button>
                 </div>
             </div>
 
@@ -261,12 +269,13 @@
                         <div class="t-seg early"></div>
                         <div class="t-seg good"></div>
                         <div class="t-seg sweet"></div>
+                        <div class="t-seg good2"></div>
                         <div class="t-seg late"></div>
                         <div class="timing-cursor" id="timingCursor"></div>
                     </div>
                     <div class="action-cluster">
                         <button type="button" id="playShotBtn" class="trigger-btn swing" disabled>SWING (SPACE)</button>
-                        <button type="button" id="runNowBtn" class="trigger-btn run" style="display:none;">RUN (R)</button>
+                        <button type="button" id="runNowBtn" class="trigger-btn run" style="display:none;">CALL RUN (R)</button>
                     </div>
                 </div>
             </div>
